@@ -266,7 +266,7 @@ class Bookmarks(object):
             xbel_file.rename(self._filename + '.bak')
         self._tree.write(self._filename, encoding='UTF-8', xml_declaration=True)
 
-class BookmarkMenu(GObject.GObject):
+class BookmarkMenu(Gtk.Menu):
     """ A menu for all the bookmarks.
 
     """
@@ -290,9 +290,8 @@ class BookmarkMenu(GObject.GObject):
 
         self._parent = parent
         self._bookmarks = Bookmarks(filename)
-        self._menu = Gtk.Menu()
-        self._built = False
         self.show_action_icons = False
+        GLib.idle_add(self._do_build_menu)
 
     def _do_build_menu(self):
         """ Build the menu in a thread.
@@ -300,7 +299,7 @@ class BookmarkMenu(GObject.GObject):
         """
 
         try:
-            GLib.idle_add(self._menu.foreach,self._menu.remove)
+            GLib.idle_add(self.foreach,self.remove)
             GLib.idle_add(self._add_bookmark_item)
             self._build_menu(self._bookmarks.get_root())
             self._built = True
@@ -308,24 +307,22 @@ class BookmarkMenu(GObject.GObject):
             logging.error('Error building bookmarks menu: {err}'.format(**locals()))
 
     def _menu_position(self, menu: object, x: int, y: int,
-                           data: object) -> tuple:
+                       data: object) -> tuple:
         """ Position the bookmark menu.
 
         """
 
         offset = 22
         return (int(data.x_root - data.x),
-               int(data.y_root - data.y) + offset, False)
+                int(data.y_root - data.y) + offset, False)
 
-    def popup(self, event: object):
+    def popup(self, *args, **kwargs):
         """ Popup the menu.
 
         """
 
-        if not self._built:
-            GLib.idle_add(self._do_build_menu)
-        self._menu.popup(None, None, self._menu_position, event, event.button,
-                         event.time)
+        GLib.idle_add(self.show_all)
+        super().popup(*args, **kwargs)
 
     def update_menu(func: object) -> object:
         """ Update the menu after every method that changes the bookmarks.
@@ -340,7 +337,7 @@ class BookmarkMenu(GObject.GObject):
             result = func(self, *args, **kwargs)
             if result:
                 self._bookmarks.save()
-                self._built = False
+                GLib.idle_add(self._do_build_menu)
 
         return wrapper
 
@@ -350,7 +347,7 @@ class BookmarkMenu(GObject.GObject):
         """
 
         if root == self._bookmarks.get_root():
-            menu = self._menu
+            menu = self
         else:
             menu = Gtk.Menu()
 
@@ -371,12 +368,10 @@ class BookmarkMenu(GObject.GObject):
                 menu_item.connect('button-release-event',
                                  self._bookmark_release, i)
             if menu_item:
-                GLib.idle_add(menu_item.show_all)
                 GLib.idle_add(menu.add, menu_item)
 
         menu.append(Gtk.SeparatorMenuItem())
         GLib.idle_add(self._append_folder_items, menu, root)
-        GLib.idle_add(menu.show_all)
 
         return menu
 
@@ -389,9 +384,8 @@ class BookmarkMenu(GObject.GObject):
                                     'bookmark-new-symbolic',
                                     show_icon=True)
         item.connect('activate', lambda itm: self.bookmark_page())
-        GLib.idle_add(item.show_all)
-        self._menu.append(item)
-        self._menu.append(Gtk.SeparatorMenuItem())
+        self.append(item)
+        self.append(Gtk.SeparatorMenuItem())
 
     def _append_folder_items(self, menu: object, element: object):
         """ Append folder related items to the menu.
@@ -507,7 +501,7 @@ class BookmarkMenu(GObject.GObject):
         """
 
         uri, title = self.emit('new-bookmark')
-        self._menu.popdown()
+        self.popdown()
 
         edit_dialog = EditDialog(self._parent, 'Bookmark Page',
                                  'bookmark-new-symbolic',
@@ -589,7 +583,7 @@ class BookmarkMenu(GObject.GObject):
 
         """
 
-        self._menu.popdown()
+        self.popdown()
         edit_dialog = EditDialog(self._parent,
                                  'Edit {element.tag}'.format(**locals()),
                                  'document-edit-symbolic',
@@ -629,7 +623,7 @@ class BookmarkMenu(GObject.GObject):
 
         """
 
-        self._menu.popdown()
+        self.popdown()
         self._bookmarks.remove(element)
 
         return True
@@ -756,6 +750,7 @@ class EntryDialog(GObject.GObject):
         """
 
         self._window.show_all()
+        self._name_entry.grab_focus()
 
         self._loop_level = Gtk.main_level() + 1
         Gtk.main()

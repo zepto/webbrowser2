@@ -24,6 +24,7 @@
 """
 
 import os
+import sys
 import tempfile
 import subprocess
 import logging
@@ -66,11 +67,12 @@ class BrowserProc(object):
 
         self._tmp_files = []
 
+        self._fallback_search = 'https://startpage.com/do/search?query=%s'
+
         self._dict = com_dict
         self._private = com_dict.pop('private', True)
         self._web_view_settings = com_dict.pop('web-view-settings', {})
-        self._search_url = com_dict.pop('search-url',
-                                        'https://startpage.com/do/search?query=%s')
+        self._search_url = com_dict.pop('search-url', self._fallback_search)
 
         self._pid = current_process().pid
 
@@ -134,7 +136,7 @@ class BrowserProc(object):
         # settings.set_property('enable-accelerated-2d-canvas', True)
         # settings.set_property('enable-developer-extras', True)
         # Chromium user agent string.
-        settings.set_property('user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36')
+        # settings.set_property('user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36')
         # Firefox user agent string.
         # settings.set_property('user-agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:45.0) Gecko/20100101 Firefox/45.0')
 
@@ -171,7 +173,7 @@ class BrowserProc(object):
 
         view_dict = ChildDict()
         view_dict.update({
-            'send': lambda signal, data: com_pipe.send((signal, data)),
+            'send': lambda signal, data: self._send(signal, data, com_pipe),
             'recv': com_pipe.recv,
             'grab_focus': webview.grab_focus,
             'update-status': lambda info: self._update_status(view_dict, info),
@@ -189,35 +191,40 @@ class BrowserProc(object):
             'find-options': WebKit2.FindOptions.CASE_INSENSITIVE |
                             WebKit2.FindOptions.WRAP_AROUND,
             'blank-page': lambda: self._is_blank(view_dict),
+            'webview-sig-ids': [],
             })
 
         if socket_id: view_dict['plug'] = self._create_plug(view_dict)
 
-        webview.connect('motion-notify-event',
-                        lambda *a: view_dict.send('mouse-motion', True))
-        webview.connect('decide-policy', self._policy, view_dict)
-        webview.connect('permission-request', self._permission, view_dict)
-        webview.connect('create', self._new_window, view_dict)
-        webview.connect('load-failed-with-tls-errors', self._tls_errors,
-                        view_dict)
-        webview.connect('load-changed', self._load_status, view_dict)
-        webview.connect('mouse-target-changed', self._mouse_target_changed,
-                        view_dict)
-        webview.connect('notify::title', self._property_changed, view_dict)
-        webview.connect('notify::uri', self._property_changed, view_dict)
-        webview.connect('notify::estimated-load-progress',
-                        self._property_changed, view_dict)
-        webview.connect('notify::favicon', self._icon_loaded, view_dict)
-        webview.connect('notify::load-failed', self._load_error, view_dict)
-        webview.connect('notify::is-loading', self._property_changed, view_dict)
-        webview.connect('notify::is-playing-audio', self._property_changed,
-                        view_dict)
-        webview.connect('insecure-content-detected', self._insecure_detect,
-                        view_dict)
-        webview.connect('resource-load-started', self._resource_started,
-                        view_dict)
-        webview.connect('context-menu', self._context_menu, view_dict)
-        webview.connect('web-process-crashed', self._crashed, view_dict)
+        signal_handlers = (
+                ('motion-notify-event',
+                    lambda *a: view_dict.send('mouse-motion', True)),
+                ('decide-policy', self._policy, view_dict),
+                ('permission-request', self._permission, view_dict),
+                ('create', self._new_window, view_dict),
+                ('load-failed-with-tls-errors', self._tls_errors, view_dict),
+                ('load-changed', self._load_status, view_dict),
+                ('mouse-target-changed', self._mouse_target_changed,
+                    view_dict),
+                ('notify::title', self._property_changed, view_dict),
+                ('notify::uri', self._property_changed, view_dict),
+                ('notify::estimated-load-progress', self._property_changed,
+                    view_dict),
+                ('notify::favicon', self._icon_loaded, view_dict),
+                ('notify::load-failed', self._load_error, view_dict),
+                ('notify::is-loading', self._property_changed, view_dict),
+                ('notify::is-playing-audio', self._property_changed,
+                    view_dict),
+                ('insecure-content-detected', self._insecure_detect,
+                    view_dict),
+                ('resource-load-started', self._resource_started, view_dict),
+                ('context-menu', self._context_menu, view_dict),
+                ('web-process-crashed', self._crashed, view_dict),
+                )
+
+        for signal, func, *args in signal_handlers:
+            view_dict.webview_sig_ids.append(webview.connect(signal, func,
+                                             *args))
 
         find_controller.connect('found-text', self._found_text, view_dict)
         find_controller.connect('failed-to-find-text', self._found_failed,
@@ -242,6 +249,16 @@ class BrowserProc(object):
         plug.connect('delete-event', self._delete, view_dict)
 
         return plug
+
+    def _send(self, signal: str, data: object, com_pipe: object):
+        """ Send signal with data over com_pipe.
+
+        """
+
+        try:
+            com_pipe.send((signal, data))
+        except BrokenPipeError as err:
+            logging.error("PIPE BROKE CLOSING: {err}".format(**locals()))
 
     def _restore_session(self, session_data: bytes, view_dict: dict):
         """ Restores the session for view_dict.
@@ -290,38 +307,26 @@ class BrowserProc(object):
 
         webview = view_dict.webview
         uri = webview.get_uri()
+        logging.info('IS BLANK {uri} {back} {forward}'.format(uri=uri,
+            back=webview.can_go_back(), forward=webview.can_go_forward()))
         return not (webview.can_go_back() or webview.can_go_forward() or
                     (uri and uri != 'about:blank'))
-
-    def _clear(self, view_dict: dict, target: str = 'all'):
-        """ Clear cookies, cache, or favicons, or all of them.
-
-        """
-
-        ctx = view_dict.webview.get_context()
-
-        if target in ['all', 'cookies']:
-            ctx.get_cookie_manager().delete_all_cookies()
-        if target in ['all', 'cache']:
-            ctx.clear_cache()
-        if target in ['all', 'favicons']:
-            if ctx.get_favicon_database_directory():
-                ctx.get_favicon_database().clear()
 
     def _delete(self, plug: object, event: object, view_dict: dict):
         """ Destroy the webview before the plug.
 
         """
 
-        # Close all temporary files.
-        for f in self._tmp_files: f.close()
+        # Disconnect all signal handlers for the web_view.
+        for sig_id in view_dict.webview_sig_ids:
+            view_dict.webview.disconnect(sig_id)
 
         # Try to make web_view clear up all memory before destroying.
         view_dict.webview.stop_loading()
         view_dict.webview.load_uri('about:blank')
 
-        # Clear all cache and cookies.
-        self._clear(view_dict, 'all')
+        # Remove the webview from the overlay before destroying it.
+        view_dict.overlay.remove(view_dict.webview)
 
         # Wait for the webview to be destroyed.
         view_dict.webview.destroy()
@@ -347,6 +352,9 @@ class BrowserProc(object):
         self._windows.remove(view_dict)
 
         if not self._windows:
+            # Close all temporary files.
+            for f in self._tmp_files: f.close()
+
             logging.info("Destroying: {self._pid}".format(**locals()))
             try:
                 com_pipe.send(('terminate', send_dict))
@@ -446,6 +454,10 @@ class BrowserProc(object):
         if signal == 'web-view-settings':
             settings = view_dict.webview.get_settings()
             settings.set_property(*data)
+
+        if signal == 'default-search':
+            self._search_url = data
+            view_dict.search_url = data
 
         return True
 
@@ -623,7 +635,10 @@ class BrowserProc(object):
             return True
 
         if action.get_name() == 'search-web':
-            selected_text = view_dict.search_url % selected_text
+            try:
+                selected_text = view_dict.search_url % selected_text
+            except TypeError:
+                selected_text = self._fallback_search % selected_text
 
         settings = {'uri': selected_text, 'focus': False}
         if not flags & Gdk.ModifierType.SHIFT_MASK:
@@ -646,7 +661,11 @@ class BrowserProc(object):
         if '\n' not in data:
             # Data doesn't look like a uri so treat it as a search
             # string.
-            if not looks_like_uri(data): data = view_dict.search_url % data
+            if not looks_like_uri(data):
+                try:
+                    data = view_dict.search_url % data
+                except TypeError:
+                    data = self._fallback_search % data
             # Data looks like a uri but it doesn't start with
             # somthing:// so prepend http:// to it.
             if ':' not in data: data = 'http://%s' % data
@@ -663,6 +682,22 @@ class BrowserProc(object):
         """
 
         uri = request.get_uri()
+
+        if '.mp3?' in uri:
+            http_headers = request.get_http_headers()
+            mimetype = http_headers.get_content_type()
+            length = http_headers.get_content_length()
+            user_agent = webview.get_settings().get_property('user-agent')
+            filename = uri.split('/')[-1]
+            info_dict = {
+                    'uri': uri,
+                    'filename': filename,
+                    'mime-type': mimetype,
+                    'length': length,
+                    'user-agent': user_agent,
+                    'start': False,
+                    }
+            view_dict.send('download', info_dict)
 
         logging.debug("RESOURCE {uri}".format(**locals()))
         if webview.get_uri().startswith('https') and uri.startswith('http:'):
@@ -844,6 +879,10 @@ class BrowserProc(object):
 
         value = webview.get_property(prop.name)
         name = prop.name
+
+        if name == 'uri':
+            GLib.idle_add(self._send_back_forward, view_dict)
+
         logging.info("{name}: {value}".format(name=name.upper(), value=value))
         view_dict.send(name, value)
 

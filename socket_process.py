@@ -39,7 +39,8 @@ gi_require_version('WebKit2', '4.0')
 from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GdkPixbuf
 
 from functions import looks_like_uri, get_config_path, save_dialog
-from classes import ChildDict, SettingsMenu, Config
+from classes import ChildDict, SettingsMenu, Config, SettingsPopover
+from classes import SettingsManager, SessionManager, DownloadManager, SearchSettings
 from bookmarks import BookmarkMenu
 
 
@@ -55,8 +56,7 @@ class MainWindow(object):
 
         """
 
-        self._config = Config('default')
-        self._sessions_file = self._config.sessions_file
+        self._config = Config(profile)
         self._bookmarks_file = self._config.bookmarks_file
 
         self._socket = self._config.open_socket(uri_list)
@@ -64,21 +64,14 @@ class MainWindow(object):
             com_pipe.send(('quit', True))
             return None
 
-        with pathlib.Path(self._sessions_file) as sessions_file:
-            tmp_dict = {}
-            if sessions_file.exists():
-                tmp_dict = json_loads(sessions_file.read_text())
-                sessions_file.unlink()
-            self._sessions = tmp_dict.get('sessions', [])
-            self._last_tab = tmp_dict.get('last-tab', [])
-
         self._name = 'Web Browser'
         self._find_str = self._config.get('find-str', '')
+        self._clear_on_exit = self._config.get('clear-on-exit', True)
 
-        self._search = self._config.get('search', {
-            'startpage': 'https://startpage.com/do/search?query=%s',
-            'default': 'startpage',
+        search_dict = self._config.get('search', {
+            'StartPage': 'https://startpage.com/do/search?query=%s',
             })
+        default_search = self._config.get('default-search', 'StartPage')
 
         self._web_view_settings = self._config.get('web-view-settings', {
             'enable-page-cache': False,
@@ -96,24 +89,13 @@ class MainWindow(object):
             'enable-webgl': True,
             'enable-accelerated-2d-canvas': True,
             'enable-developer-extras': True,
+            'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36',
             })
 
         self._revived = []
         self._pid_map = {}
         self._events = []
-        self._settings_menu = SettingsMenu(self._web_view_settings)
-        self._settings_menu.connect('setting-changed', self._web_view_settings_changed)
         self._fixed_address_bar = self._config.get('fixed-address-bar', True)
-
-        button = Gtk.ModelButton.new()
-        button.set_label('HELLO')
-        button.set_property('margin', 6)
-        button.connect('clicked', lambda *a: self._main_popover.hide())
-        button.show_all()
-        self._main_popover = Gtk.PopoverMenu()
-        # self._main_popover.set_modal(False)
-        # self._main_popover.set_transitions_enabled(True)
-        self._main_popover.add(button)
 
         self._windows = {}
         self._closed = {}
@@ -185,7 +167,7 @@ class MainWindow(object):
         self._window = Gtk.Window()
         self._window.set_title(self._name)
         self._window.add_accel_group(self._accels)
-
+        self._window.set_size_request(500, 540)
         self._window.set_default_size(self._config.get('width', width),
                                       self._config.get('height', height))
         self._window.set_resizable(True)
@@ -208,10 +190,51 @@ class MainWindow(object):
         start_action_box.attach(new_button, 0, 0, 1, 1)
         start_action_box.show_all()
 
+        self._search_settings = SearchSettings(search_dict, self._window)
+        self._search_settings.set_default(default_search)
+        self._search_settings.connect('default-changed', self._default_search_changed)
+        self._search_settings.connect('search-changed', lambda *a: self._save_config())
+        self._search_settings.connect('search-added', lambda *a: self._save_config())
+        self._search_settings.connect('search-removed', lambda *a: self._save_config())
+
+        self._settings_manager = SettingsManager()
+        self._settings_manager.add_bool_setting('clear-on-exit',
+                                           self._clear_on_exit,
+                                           'Clear All Data On Exit',
+                                           'Clear the cache, favicon database, and cookies on exit.')
+        self._settings_manager.add_settings(self._web_view_settings)
+        self._settings_manager.add_custom_setting(self._search_settings)
+        self._settings_manager.show_clear_buttons(True)
+        self._settings_manager.connect('setting-changed', self._web_view_settings_changed)
+
+        self._session_manager = SessionManager()
+        self._session_manager.connect('restore-session', self._restore_session_cb)
+
+        self._download_manager = DownloadManager(self._window)
+
+        self._main_popover = SettingsPopover()
+        self._main_popover.add_tab(self._settings_manager, 'Settings')
+        self._main_popover.add_tab(self._session_manager, 'Closed Sessions')
+        self._main_popover.add_tab(self._download_manager, 'Downloads')
+        # self._main_popover.set_modal(False)
+        width, height = self._window.get_size()
+        self._main_popover.set_size_request(500, 500)
+        # self._main_popover.set_transitions_enabled(True)
+
+        icon = Gio.ThemedIcon.new_with_default_fallbacks('open-menu-symbolic')
+        menu_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
+
+        menu_button = Gtk.MenuButton()
+        menu_button.set_popover(self._main_popover)
+        menu_button.set_image(menu_img)
+        menu_button.set_relief(Gtk.ReliefStyle.NONE)
+
         end_action_box = Gtk.Grid()
+        end_action_box.attach(menu_button, 0, 0, 1, 1)
         end_action_box.show_all()
 
         self._tabs = Gtk.Notebook()
+        self._tabs.popup_enable()
         self._tabs.set_action_widget(start_action_box, Gtk.PackType.START)
         self._tabs.set_action_widget(end_action_box, Gtk.PackType.END)
         self._tabs.add_events(Gdk.EventMask.SCROLL_MASK)
@@ -244,8 +267,15 @@ class MainWindow(object):
         GLib.io_add_watch(self._pipe.fileno(), GLib.IO_IN,
                                 self._recieve)
 
-        self._restore_session_list(self._sessions)
-        self._sessions = []
+        with pathlib.Path(self._config.sessions_file) as sessions_file:
+            tmp_dict = {}
+            if sessions_file.exists():
+                tmp_dict = json_loads(sessions_file.read_text())
+                sessions_file.unlink()
+            sessions = tmp_dict.get('sessions', [])
+            self._last_tab = tmp_dict.get('last-tab', [])
+
+        self._restore_session_list(sessions)
 
         for uri in uri_list:
             if not self._windows and uri == 'about:blank':
@@ -264,7 +294,7 @@ class MainWindow(object):
         com_dict = Manager().dict({
             'private': private,
             'web-view-settings': self._web_view_settings,
-            'search-url': self._search[self._search['default']],
+            'search-url': self._search_settings.get_default(),
             })
 
         socket_id, child = self._add_tab(main_pipe, com_dict, focus, uri=uri,
@@ -274,15 +304,44 @@ class MainWindow(object):
 
         return com_dict, child
 
-    def _web_view_settings_changed(self, settings_menu: object, setting: str,
+    def save_config(func):
+        """ Wrap button release events.
+
+        """
+
+        def wrapper(self, *args, **kwargs):
+            """ Call func only if the mouse is still over widget.
+
+            """
+
+            return_val = func(self, *args, **kwargs)
+            self._save_config()
+            return return_val
+
+        return wrapper
+
+    @save_config
+    def _web_view_settings_changed(self, settings_manager: object, setting: str,
                                    value: object):
         """ Send the changes to all children processes.
 
         """
 
-        self._web_view_settings[setting] = value
-        self._send_all('web-view-settings', (setting, value))
+        if setting == 'clear-on-exit':
+            self._config[setting] = value
+        else:
+            self._web_view_settings[setting] = value
+            self._send_all('web-view-settings', (setting, value))
 
+    @save_config
+    def _default_search_changed(self, search_settings: object, uri: str):
+        """ Set the default search engine.
+
+        """
+
+        self._send_all('default-search', uri)
+
+    @save_config
     def _size_allocate(self, window: object, allocation: object):
         """ Save the window size.
 
@@ -331,25 +390,12 @@ class MainWindow(object):
             # Disconnect some event handlers.
             for widget, event_id in self._events: widget.disconnect(event_id)
 
-            # Save all open sessions.
-            self._sessions = []
-            for child in self._windows.values():
-                child.send('get-session', True)
-                signal, data = child.recv()
-                logging.info("GETTING SESSION {signal}".format(**locals()))
-                if signal == 'session-data' and data:
-                    child.save_session(data)
-
-            with pathlib.Path(self._sessions_file) as sessions_file:
-                json_str = json_dumps({
-                    'sessions': self._sessions,
-                    'last-tab': self._last_tab,
-                    }, indent=4)
-                sessions_file.write_text(json_str)
+            # Save all open sessions before closing them.
+            self._save_sessions(self._config.sessions_file)
 
             logging.info("CLOSING ALL TABS")
             # Send the close signal to all tabs.
-            [child.close() for child in self._windows.values()]
+            for child in self._windows.values(): child.close()
 
         # Don't let the window be destroyed until all the tabs are
         # closed.
@@ -362,12 +408,13 @@ class MainWindow(object):
 
         logging.info("DESTROY")
 
-        self._config['web-view-settings'] = self._settings_menu.get_config()
+        # Clear all cache and cookies.
+        self._settings_manager.clear('all')
 
         # Save the config.
-        self._config['web-view-settings'] = self._web_view_settings
-        self._config['search'] = self._search
-        self._config.save_config()
+        self._save_config()
+
+        self._download_manager.cancel_all()
 
         Gtk.main_quit()
         self._send('quit', True)
@@ -381,6 +428,45 @@ class MainWindow(object):
         """
 
         if self._socket: Gtk.main()
+
+    def _save_config(self):
+        """ Save the config.
+
+        """
+
+        self._config['web-view-settings'] = self._web_view_settings
+        self._config['search'] = self._search_settings.get_all()
+        self._config['default-search'] = self._search_settings.get_default_name()
+        self._config.save_config()
+
+    def _save_sessions(self, filename: str):
+        """ Save all open tabs sessions to filename.
+
+        """
+
+        # Save all open sessions.
+        sessions = []
+        for child in self._windows.values():
+            child.send('get-session', True)
+            signal, data = child.recv()
+            logging.info("GETTING SESSION {signal}".format(**locals()))
+            if signal == 'session-data' and data:
+                sessions.append(child.get_session(data))
+
+        with pathlib.Path(filename) as sessions_file:
+            json_str = json_dumps({
+                'sessions': sessions,
+                'last-tab': self._last_tab,
+                }, indent=4)
+            sessions_file.write_text(json_str)
+
+    def _restore_session_cb(self, session_manager: object, session: dict):
+        """ Restore session.
+
+        """
+
+        self._main_popover.hide()
+        self._restore_session(session)
 
     def _restore_session_list(self, session_list: list):
         """ Restore a list of sessions.
@@ -416,8 +502,8 @@ class MainWindow(object):
             self._tabs.reorder_child(child.tab_grid, session['index'])
         child.send('restore-session', session)
 
-    def _save_session(self, child: dict, session_data: object):
-        """ Save the session data for child.
+    def _get_session(self, child: dict, session_data: object):
+        """ Build a dictionary of all session data for child and return it.
 
         """
 
@@ -429,8 +515,10 @@ class MainWindow(object):
                 'private': child.private,
                 'focus': child.focus,
                 'title': child.title,
+                'uri': child.uri,
                 }
-        self._sessions.append(session_dict)
+
+        return session_dict
 
     def _callback(self, source: int, cb_condition: int, window: dict):
         """ Handle each window.
@@ -571,6 +659,7 @@ class MainWindow(object):
 
         if signal == 'can-go-back':
             window['back-button'].set_sensitive(data)
+
         if signal == 'can-go-forward':
             window['forward-button'].set_sensitive(data)
 
@@ -587,23 +676,22 @@ class MainWindow(object):
             window.current = current_dict
             window.forward_list = forward_list
 
+            # Save the sessions so they can be restored if the browser
+            # crashes.
+            # self._save_sessions(self._config.sessions_file)
+
         if signal == 'is-loading':
             window.is_loading = data
 
         if signal == 'session-data':
             logging.info("Recieved Session Data")
-            window.session_data = data
-            window.save_session(data)
+            if data:
+                session_dict = window.get_session(data)
+                self._session_manager.add_session(session_dict)
 
         if signal == 'download':
-            context = WebKit2.WebContext.get_default()
-            download = context.download_uri(data['uri'])
-            download.connect('created-destination', self._download_created_destination)
-            download.connect('decide-destination', self._download_decide_destination)
-            download.connect('failed', self._download_failed)
-            download.connect('finished', self._download_finished)
-            download.connect('notify::response', self._download_response)
-            download.connect('notify::estimated-progress', self._download_progress)
+            self._download_manager.new_download(data['uri'],
+                                                start=data.get('start', True))
 
         return True
 
@@ -620,62 +708,6 @@ class MainWindow(object):
 
         return True
 
-    def _download_created_destination(self, download: object, destination: str):
-        """ The destination was decided on.
-
-        """
-
-        logging.info('DOWNLOAD DESTINATION {destination}'.format(**locals()))
-
-    def _download_decide_destination(self, download: object,
-                                     suggested_filename: str) -> bool:
-        """ Get a filename to save to.
-
-        """
-
-        logging.info('DOWNLOAD TO {suggested_filename}'.format(**locals()))
-        folder = GLib.get_user_special_dir(GLib.USER_DIRECTORY_DOWNLOAD)
-        filename = save_dialog(suggested_filename, folder, self._window,
-                               'Download To')
-        if not filename:
-            download.cancel()
-            return True
-
-        logging.info('Setting it to {filename}'.format(**locals()))
-        download.set_destination(GLib.filename_to_uri(filename))
-
-        return False
-
-    def _download_failed(self, download: object, error: object):
-        """ Download failed.
-
-        """
-
-        logging.error('DOWNLOAD FAILED: {error}'.format(**locals()))
-
-    def _download_finished(self, download: object):
-        """ Download finished.
-
-        """
-
-        logging.info('DOWNLOAD FINISHED')
-
-    def _download_response(self, download: object, response: object):
-        """ Download response changed.
-
-        """
-
-        uri = download.get_property(response.name).get_uri()
-        logging.info('DOWNLOAD RESPONSE: {uri}'.format(**locals()))
-
-    def _download_progress(self, download: object, progress: float):
-        """ The download progress.
-
-        """
-
-        progress = download.get_property(progress.name)
-        logging.info('DOWNLOAD PROGRESS: {progress}'.format(**locals()))
-
     def _update_title(self, child: dict):
         """ Update the window title.
 
@@ -687,6 +719,8 @@ class MainWindow(object):
         child.event_box.set_tooltip_text(child.title_str)
         if child == self._get_current_child():
             self._window.set_title('{child.title-str} - {self._name}'.format(**locals()))
+
+        self._tabs.set_menu_label_text(child.tab_grid, child.title_str)
 
     def _send(self, signal: str, data: object):
         """ Send signal and data using the main pipe.
@@ -804,23 +838,11 @@ class MainWindow(object):
         button_item = Gtk.ToolItem()
         button_item.add(history_grid)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('open-menu-symbolic')
-        menu_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
-        menu_button = Gtk.MenuButton()
-        menu_button.set_popover(self._main_popover)
-        menu_button.set_image(menu_img)
-        menu_button.set_relief(Gtk.ReliefStyle.NONE)
-
-        menu_item = Gtk.ToolItem()
-        menu_item.add(menu_button)
-
         address_bar = Gtk.Toolbar()
         address_bar.set_hexpand(True)
         address_bar.set_valign(Gtk.Align.START)
         address_bar.add(button_item)
         address_bar.add(address_item)
-        address_bar.add(Gtk.SeparatorToolItem())
-        address_bar.add(menu_item)
 
         label = Gtk.Label('about:blank')
         label.set_margin_top(7)
@@ -935,8 +957,7 @@ class MainWindow(object):
             'normal-width': 150 + 16 + 16,
             'state': {'minimized': False, 'hidden': False},
             'set-state': lambda state: self._set_state(child, state),
-            'session-data': b'',
-            'save-session': lambda data: self._save_session(child, data),
+            'get-session': lambda data: self._get_session(child, data),
             })
 
         eventbox.set_size_request(child.normal_width, -1)
@@ -945,8 +966,10 @@ class MainWindow(object):
 
         find_close.connect('clicked', lambda btn: find_bar.hide())
         back_button.connect('button-release-event', self._back_released, child)
+        back_button.connect('button-press-event', lambda btn, evnt: evnt.button == 3)
         forward_button.connect('button-release-event', self._forward_released,
                                child)
+        forward_button.connect('button-press-event', lambda btn, evnt: evnt.button == 3)
         child['plug-removed'] = socket.connect('plug-removed',
                                                self._plug_removed, child)
         socket.connect('plug-added', self._plug_added, child)
@@ -1248,7 +1271,9 @@ class MainWindow(object):
         """
 
         if icon_pos == Gtk.EntryIconPosition.PRIMARY:
-            self._bookmark_menu.popup(event)
+            self._bookmark_menu.popup(None, None,
+                                      self._bookmark_menu._menu_position,
+                                      event, event.button, event.time)
             return False
 
         if icon_pos == Gtk.EntryIconPosition.SECONDARY:
