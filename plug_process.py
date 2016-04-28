@@ -443,10 +443,10 @@ class BrowserProc(object):
         if signal == 'restore-session':
             webview = view_dict.webview
             uri = webview.get_uri()
-            if not view_dict.blank_page():
-                new_win = self._new_tab(view_dict, data)
-            else:
+            if view_dict.blank_page():
                 view_dict.restore_session(data['session-data'])
+            else:
+                new_win = self._new_tab(view_dict, data)
 
         if signal == 'get-session':
             view_dict.send_session()

@@ -607,21 +607,21 @@ class MainWindow(object):
             window.icon_stack.get_child_by_name('spinner').start()
             window.insecure_content = False
         elif signal == 'load-status' and data == 3:
-            window.address_entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
-                                             self._refresh_icon)
-            window.address_entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
+            entry = window.address_entry
+            entry.set_progress_fraction(0)
+            entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
+                                      self._refresh_icon)
+            entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
                                                'Reload current address.')
             window.icon_stack.set_visible_child_name('icon')
             window.icon_stack.get_child_by_name('spinner').stop()
-            window.address_entry.set_progress_fraction(0)
 
         if signal == 'uri' and data:
             window['uri'] = data
             window.address_entry.set_text('' if data == 'about:blank' else data)
 
         if signal == 'estimated-load-progress':
-            window.address_entry.set_progress_fraction(data)
-            if data == 1.0: window.address_entry.set_progress_fraction(0)
+            window.address_entry.set_progress_fraction(data if data < 1 else 0)
 
         if signal == 'hover-link':
             window['hover-uri'] = data['uri']
