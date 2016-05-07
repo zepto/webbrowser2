@@ -37,17 +37,17 @@ def run_browser(data: object):
     browser.run()
 
 
-def run_main(com_pipe: object, com_dict: object, **kwargs):
+def run_main(com_pipe: object, **kwargs):
     """ Runs a main.
 
     """
 
     from socket_process import MainWindow
-    main = MainWindow(com_pipe, com_dict, **kwargs)
+    main = MainWindow(com_pipe, **kwargs)
     main.run()
 
 
-def main(main_cpipe: object, main_dict: object):
+def main(main_proc: object, main_cpipe: object):
     """ Listen on main_cpipe for signals.  Depending on what signal is recieved
     it will start new child processes.
 
@@ -55,7 +55,7 @@ def main(main_cpipe: object, main_dict: object):
 
     window_dict = {}
 
-    while True:
+    while main_proc.is_alive():
         try:
             signal, data = main_cpipe.recv()
         except KeyboardInterrupt:
@@ -125,15 +125,14 @@ if __name__ == '__main__':
                         level=verbosity, datefmt='%a %h %d %T')
 
     main_cpipe, main_ppipe = Pipe()
-    main_dict = Manager().dict({'Quit': False})
 
     # main_p = Process(target=main, args=(main_cpipe, main_dict))
-    main_p = Process(target=run_main, args=(main_ppipe, main_dict),
+    main_p = Process(target=run_main, args=(main_ppipe,),
                      kwargs={'profile': args.profile, 'uri_list': args.uri})
     main_p.start()
     logging.info("main pid: {main_p.pid}".format(**locals()))
 
-    main(main_cpipe, main_dict)
+    main(main_p, main_cpipe)
 
     # from socket_process import MainWindow
     # main = MainWindow(main_ppipe, main_dict, profile=args.profile,

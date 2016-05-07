@@ -78,7 +78,7 @@ class ChildDict(dict):
         self.__setitem__(item.replace('_', '-', item.count('_')), data)
 
 
-class Config(dict):
+class Profile(dict):
     """ A configuration dictionary that writes to a file in xdg-config
     directory.
 
@@ -89,7 +89,7 @@ class Config(dict):
 
         """
 
-        super(Config, self).__init__()
+        super(Profile, self).__init__()
 
         self._socket = None
 
@@ -102,7 +102,76 @@ class Config(dict):
 
         self._socket_file = self._config_path.joinpath(__name__ + '.sock')
         self.sessions_file = self._config_path.joinpath('sessions.json')
+        self.crash_file = self._config_path.joinpath('crash.json')
         self.bookmarks_file = str(self._config_path.joinpath('bookmarks.xbel'))
+
+    def __getitem__(self, key: object) -> object:
+        """ Get the config item otherwise create a default.
+
+        """
+
+        try:
+            return super(Profile, self).__getitem__(key)
+        except KeyError:
+            if key == 'web-view-settings':
+                self[key] = {
+                        'enable-page-cache': False,
+                        'enable-dns-prefetching': False,
+                        'enable-html5-database': False,
+                        'enable-html5-local-storage': False,
+                        'enable-offline-web-application-cache': False,
+                        'enable-hyperlink-auditing': True,
+                        'enable-media-stream': False,
+                        'enable-java': False,
+                        'enable-plugins': False,
+                        'enable-mediasource': True,
+                        'enable-javascript': True,
+                        'enable-webaudio': True,
+                        'enable-webgl': True,
+                        'enable-accelerated-2d-canvas': True,
+                        'enable-developer-extras': True,
+                        }
+            elif key == 'search':
+                self[key] = {
+                        'StartPage': 'https://startpage.com/do/search?query=%s'
+                        }
+            elif key == 'default-search':
+                self[key] = 'StartPage'
+            elif key == 'user-agents':
+                self[key] = {
+                        'Chromium': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36',
+                        }
+            elif key == 'default-user-agent':
+                self[key] = 'Chromium'
+            elif key == 'find-str':
+                self[key] = ''
+            elif key == 'clear-on-exit':
+                self[key] = True
+            elif key == 'hide-address-bar':
+                self[key] = False
+            return super(Profile, self).__getitem__(key)
+
+    def __getattr__(self, item: str):
+        """ Return the item from the dictionary.
+
+        """
+
+        try:
+            return super(Profile, self).__getattr__(item)
+        except AttributeError:
+            item = item.replace('_', '-', item.count('_'))
+            return self.__getitem__(item)
+
+    def __setattr__(self, item: str, data: object):
+        """ Put data in self[item]
+
+        """
+
+        key = item.replace('_', '-', item.count('_'))
+        if key in self:
+            self.__setitem__(key, data)
+        else:
+            super(Profile, self).__setattr__(item, data)
 
     def get_config_path(self, profile: str = 'default'):
         """ Returns the path to the config files.  If it doesn't exist it is
@@ -156,63 +225,6 @@ class Config(dict):
         self._socket.close()
         self._socket_file.unlink()
 
-
-class SettingsMenu(Gtk.Menu):
-    """ A settings menu.
-
-    """
-
-    __gsignals__ = {
-            'setting-changed': (GObject.SIGNAL_RUN_LAST, None,
-                                (str, bool)),
-            }
-
-    def __init__(self, config: dict):
-        """ Build and initialize the menu.
-
-        """
-
-        super(SettingsMenu, self).__init__()
-
-        self._config = config
-
-        self._build_menu(self, config)
-
-        self.show_all()
-
-    def _build_menu(self, base: object, config: dict) -> object:
-        """ Build and return a menu config.
-
-        """
-
-        for setting, value in sorted(config.items()):
-            if value not in [True, False]:
-                submenu = Gtk.Menu()
-                self._build_menu(submenu, value)
-                item = Gtk.MenuItem(setting)
-                item.set_submenu(submenu)
-                base.append(item)
-                continue
-            item_title = setting.replace('-', ' ', setting.count('-'))
-            menu_item = Gtk.CheckMenuItem.new_with_label(item_title.title())
-            menu_item.connect('toggled', self._settings_toggled, setting)
-            menu_item.set_active(value)
-            base.append(menu_item)
-
-    def _settings_toggled(self, item: object, setting: str):
-        """ Emit the setting and the value.
-
-        """
-
-        self._config[setting] = item.get_active()
-        self.emit('setting-changed', setting, item.get_active())
-
-    def get_config(self):
-        """ Return the config state.
-
-        """
-
-        return self._config
 
 class SettingsPopover(Gtk.Popover):
     """ The Settings and session popover.
@@ -289,7 +301,7 @@ class DownloadManager(Gtk.Grid):
         clear_button.set_halign(Gtk.Align.END)
         clear_button.connect('clicked', self._clear_clicked)
 
-        self.set_row_spacing(12)
+        self.set_row_spacing(6)
         self.attach(main_stack, 0, 0, 5, 1)
         self.attach(clear_button, 4, 2, 1, 1)
         self.set_margin_bottom(6)
@@ -325,18 +337,18 @@ class DownloadManager(Gtk.Grid):
         icon = Gio.ThemedIcon.new_with_default_fallbacks('window-close-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
-        close_button = Gtk.Button()
-        close_button.set_margin_end(6)
-        close_button.set_tooltip_text('Cancel and Remove Download')
-        close_button.set_image(button_img)
-        close_button.set_relief(Gtk.ReliefStyle.NONE)
+        cancel_button = Gtk.Button()
+        cancel_button.set_margin_end(6)
+        cancel_button.set_tooltip_text('Cancel and Remove Download')
+        cancel_button.set_image(button_img)
+        cancel_button.set_relief(Gtk.ReliefStyle.NONE)
 
         download_grid = Gtk.Grid()
         download_grid.set_hexpand(True)
         download_grid.set_column_homogeneous(False)
         download_grid.attach(progress_bar, 0, 0, 1, 1)
         download_grid.attach(copy_button, 1, 0, 1, 1)
-        download_grid.attach(close_button, 2, 0, 1, 1)
+        download_grid.attach(cancel_button, 2, 0, 1, 1)
         download_grid.show_all()
 
         finish_label = Gtk.Label()
@@ -354,21 +366,21 @@ class DownloadManager(Gtk.Grid):
         open_button.set_image(button_img)
         open_button.set_relief(Gtk.ReliefStyle.NONE)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('window-close-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks('list-remove-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
-        close_button = Gtk.Button()
-        close_button.set_margin_end(6)
-        close_button.set_tooltip_text('Cancel and Remove Download')
-        close_button.set_image(button_img)
-        close_button.set_relief(Gtk.ReliefStyle.NONE)
+        remove_button = Gtk.Button()
+        remove_button.set_margin_end(6)
+        remove_button.set_tooltip_text('Remove Download')
+        remove_button.set_image(button_img)
+        remove_button.set_relief(Gtk.ReliefStyle.NONE)
 
         finish_grid = Gtk.Grid()
         finish_grid.set_hexpand(True)
         finish_grid.set_column_homogeneous(False)
         finish_grid.attach(finish_label, 0, 0, 1, 1)
         finish_grid.attach(open_button, 1, 0, 1, 1)
-        finish_grid.attach(close_button, 2, 0, 1, 1)
+        finish_grid.attach(remove_button, 2, 0, 1, 1)
         finish_grid.show_all()
 
         download_stack = Gtk.Stack()
@@ -388,7 +400,8 @@ class DownloadManager(Gtk.Grid):
                              self._download_created_destination, progress_bar)
             download.connect('decide-destination',
                              self._download_decide_destination)
-            download.connect('failed', self._download_failed, finish_label)
+            download.connect('failed', self._download_failed, finish_label,
+                             download_stack)
             download.connect('finished', self._download_finished, finish_label,
                              download_stack)
             download.connect('notify::response', self._download_response,
@@ -400,8 +413,10 @@ class DownloadManager(Gtk.Grid):
         else:
             download = None
 
-        close_button.connect('clicked', self._close_button_clicked,
-                             download_stack, download)
+        cancel_button.connect('clicked', self._close_button_clicked,
+                              download_stack, download)
+        remove_button.connect('clicked', self._close_button_clicked,
+                              download_stack, download)
 
     def cancel_all(self):
         """ Cancel all downloads.
@@ -409,6 +424,8 @@ class DownloadManager(Gtk.Grid):
         """
 
         for download in self._downloads:
+            download.disconnect_by_func(self._download_failed)
+            download.disconnect_by_func(self._download_finished)
             download.cancel()
         self._downloads = []
 
@@ -430,19 +447,18 @@ class DownloadManager(Gtk.Grid):
         clipboard.set_text(uri, -1)
 
     def _close_button_clicked(self, button: object, download_stack: object,
-                           download: object):
+                              download: object):
         """ Remove the download.
 
         """
 
         if download:
+            download.disconnect_by_func(self._download_failed)
+            download.disconnect_by_func(self._download_finished)
             download.cancel()
             self._downloads.remove(download)
 
-        for child in self._download_list.get_children():
-            if child.get_children()[0] == download_stack:
-                self._download_list.remove(child)
-                break
+        self._download_list.remove(download_stack.get_parent())
 
     def _open_clicked(self, button: object, download: object):
         """ Open the downloaded file.
@@ -498,7 +514,8 @@ class DownloadManager(Gtk.Grid):
 
         return False
 
-    def _download_failed(self, download: object, error: object, stack: object):
+    def _download_failed(self, download: object, error: object, label: object,
+                         stack: object):
         """ Download failed.
 
         """
@@ -553,12 +570,14 @@ class SessionManager(Gtk.Grid):
                                 (GObject.TYPE_PYOBJECT,)),
             }
 
-    def __init__(self):
+    def __init__(self, profile: object):
         """ Create a listbox to list all the closed tabs.
 
         """
 
         super(SessionManager, self).__init__()
+
+        self._profile = profile
 
         empty_label = Gtk.Label('No Sessions to Restore')
         empty_label.set_margin_top(12)
@@ -568,6 +587,7 @@ class SessionManager(Gtk.Grid):
         empty_label.set_hexpand(True)
 
         self._session_list = Gtk.ListBox()
+        self._session_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._session_list.set_vexpand(True)
         self._session_list.set_hexpand(True)
 
@@ -583,19 +603,34 @@ class SessionManager(Gtk.Grid):
         main_stack.set_transition_duration(300)
         main_stack.add_named(scroll, 'sessions')
         main_stack.add_named(empty_label, 'empty')
-        self._session_list.connect('remove', self._session_removed, main_stack)
-        self._session_list.connect('add', self._session_added, main_stack)
+
+        self._restore_selected_button = Gtk.Button('Restore Selected')
+        self._restore_selected_button.set_tooltip_text('Restore the selected Sessions.')
+        self._restore_selected_button.connect('clicked',
+                                        lambda button: self.restore_selected())
+        self._restore_selected_button.set_sensitive(False)
+
+        restore_all_button = Gtk.Button('Restore All')
+        restore_all_button.set_tooltip_text('Restore all Sessions in list')
+        restore_all_button.connect('clicked',
+                                   lambda button: self.restore_all())
+        restore_all_button.set_sensitive(False)
 
         clear_button = Gtk.Button('Clear List')
         clear_button.set_tooltip_text('Remove all Sessions from list')
-        clear_button.set_halign(Gtk.Align.END)
-        clear_button.connect('clicked',
-                lambda button: \
-                        self._session_list.foreach(self._session_list.remove))
+        clear_button.connect('clicked', lambda button: self.clear())
 
-        self.set_row_spacing(12)
+        button_grid = Gtk.Grid()
+        button_grid.set_column_spacing(6)
+        button_grid.set_column_homogeneous(True)
+        button_grid.attach(restore_all_button, 0, 0, 1, 1)
+        button_grid.attach(self._restore_selected_button, 1, 0, 1, 1)
+        button_grid.attach(clear_button, 2, 0, 1, 1)
+        button_grid.set_halign(Gtk.Align.END)
+
+        self.set_row_spacing(6)
         self.attach(main_stack, 0, 0, 5, 1)
-        self.attach(clear_button, 4, 2, 1, 1)
+        self.attach(button_grid, 4, 2, 1, 1)
         self.set_margin_bottom(6)
         self.set_margin_top(6)
         self.set_margin_start(6)
@@ -604,18 +639,117 @@ class SessionManager(Gtk.Grid):
         self.show_all()
         main_stack.set_visible_child_name('empty')
 
-    def add_session(self, session: dict):
+        self._session_list.connect('remove', self._session_removed, main_stack,
+                                   restore_all_button)
+        self._session_list.connect('add', self._session_added, main_stack,
+                                   restore_all_button)
+
+        self._selected = []
+        self._sessions = []
+        for session in sorted(self.load_sessions(), key=lambda i: i['index']):
+            self.add_session(session)
+
+    def load_sessions(self) -> list:
+        """ First check for the sessions file, and if it exists return the
+        dictionary from it.  If it doesn't exist try the crash file, and if
+        that doesn't exist return an empty dictionary.
+
+        """
+
+        if self._profile.sessions_file.exists():
+            session_file = self._profile.sessions_file
+        elif self._profile.crash_file.exists():
+            session_file = self._profile.crash_file
+        else:
+            return []
+
+        with pathlib.Path(session_file) as sessions_file:
+            sessions = json_loads(sessions_file.read_text())
+            sessions_file.unlink()
+
+        return sessions
+
+    def save_sessions(self, sessions: list = [], to_crash: bool = False):
+        """ Save sessions_dict to the sessions file unless to_crash is True,
+        then save it to the crash file.
+
+        """
+
+        # Save all open sessions.
+        logging.info('Saving Sessions...')
+        sessions = sessions if sessions else self._sessions
+        filename = self._profile.crash_file if to_crash else self._profile.sessions_file
+
+        if sessions:
+            with pathlib.Path(filename) as sessions_file:
+                sessions_file.write_text(json_dumps(sessions, indent=4))
+        logging.info('Saved Sessions.')
+
+    @property
+    def sessions(self) -> list:
+        """ Return the list of sessions.
+
+        """
+
+        return self._sessions
+
+    def close(self):
+        """ Disconnect some signal handlers to prevent errors.
+
+        """
+
+        self._session_list.disconnect_by_func(self._session_added)
+        self._session_list.disconnect_by_func(self._session_removed)
+
+    def clear(self):
+        """ Clear all sessions from list.
+
+        """
+
+        self._session_list.foreach(self._session_list.remove)
+        self._sessions.clear()
+        self._selected.clear()
+
+    def restore_all(self):
+        """ Restore all sessions.
+
+        """
+
+        for session in sorted(self._sessions, key=lambda i: i['index']):
+            self.emit('restore-session', session)
+
+    def restore_selected(self):
+        """ Restore all the selected sessions.
+
+        """
+
+        self._selected.sort(key=lambda i: i[0]['index'])
+        for session, button in self._selected[:]:
+            self.emit('restore-session', session)
+            button.set_active(False)
+        self._selected.clear()
+
+    def add_session(self, session: dict) -> bool:
         """ Add as session to the list.
 
         """
 
-        label = Gtk.Label(session['title'])
+        if not session: return False
+
+        # Store the session.
+        self._sessions.append(session)
+
+        title = session['title'] if session['title'] else session['uri']
+        label = Gtk.Label(title)
         label.set_halign(Gtk.Align.START)
         label.set_tooltip_text(session['uri'])
         label.set_ellipsize(Pango.EllipsizeMode.END)
         label.set_hexpand(True)
         label.set_margin_end(12)
         label.set_margin_start(3)
+
+        check_button = Gtk.CheckButton()
+        check_button.add(label)
 
         icon = Gio.ThemedIcon.new_with_default_fallbacks('document-open-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
@@ -625,61 +759,79 @@ class SessionManager(Gtk.Grid):
         restore_button.set_image(button_img)
         restore_button.set_relief(Gtk.ReliefStyle.NONE)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('window-close-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks('list-remove-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
-        close_button = Gtk.Button()
-        close_button.set_margin_end(6)
-        close_button.set_tooltip_text('Remove From List')
-        close_button.set_image(button_img)
-        close_button.set_relief(Gtk.ReliefStyle.NONE)
+        remove_button = Gtk.Button()
+        remove_button.set_margin_end(6)
+        remove_button.set_tooltip_text('Remove From List')
+        remove_button.set_image(button_img)
+        remove_button.set_relief(Gtk.ReliefStyle.NONE)
 
         grid = Gtk.Grid()
-        grid.attach(label, 0, 0, 1, 1)
+        grid.attach(check_button, 0, 0, 1, 1)
         grid.attach(restore_button, 1, 0, 1, 1)
-        grid.attach(close_button, 2, 0, 1, 1)
+        grid.attach(remove_button, 2, 0, 1, 1)
         grid.show_all()
 
         restore_button.connect('clicked', self._restore_clicked, session, grid)
-        close_button.connect('clicked', self._close_clicked, grid)
+        remove_button.connect('clicked', self._remove_clicked, session, grid)
+        check_button.connect('toggled', self._check_toggled, session)
+
         self._session_list.add(grid)
+
+        return True
 
     def _restore_clicked(self, button: object, session: dict, grid: object):
         """ Emit the restore session signal.
 
         """
 
-        for child in self._session_list.get_children():
-            if child.get_children()[0] == grid:
-                self._session_list.remove(child)
-                break
+        self._session_list.remove(grid.get_parent())
+        self._sessions.remove(session)
 
         self.emit('restore-session', session)
 
-    def _close_clicked(self, button: object, grid: object):
+    def _remove_clicked(self, button: object, session: dict, grid: object):
         """ Remove grid from session_list.
 
         """
 
-        for child in self._session_list.get_children():
-            if grid in child.get_children():
-                self._session_list.remove(child)
-                break
+        self._session_list.remove(grid.get_parent())
+        self._sessions.remove(session)
 
-    def _session_removed(self, listbox: object, widget: object, stack: object):
+    def _check_toggled(self, button: object, session: dict):
+        """ Add session and button to self._selected.
+
+        """
+
+        if button.get_active():
+            self._selected.append((session, button))
+        else:
+            self._selected.remove((session, button))
+
+        self._restore_selected_button.set_sensitive(bool(self._selected))
+        # self._clear_selected.set_sensitive(bool(self._selected))
+
+    def _session_removed(self, listbox: object, widget: object, stack: object,
+                         restore_all_button: object):
         """ Add a label if the listbox is empty.
 
         """
 
         if not listbox.get_children():
             stack.set_visible_child_name('empty')
+            restore_all_button.set_sensitive(False)
+            self._restore_selected_button.set_sensitive(False)
 
-    def _session_added(self, listbox: object, widget: object, stack: object):
+    def _session_added(self, listbox: object, widget: object, stack: object,
+                       restore_all_button: object):
         """ Remove the label if a download is added.
 
         """
 
         stack.set_visible_child_name('sessions')
+        restore_all_button.set_sensitive(True)
 
 
 class SettingsManager(Gtk.Grid):
@@ -690,16 +842,16 @@ class SettingsManager(Gtk.Grid):
     __gsignals__ = {
             'setting-changed': (GObject.SIGNAL_RUN_LAST, None,
                                 (str, object)),
-            'clear-cache': (GObject.SIGNAL_RUN_LAST, None, ()),
-            'clear-cookies': (GObject.SIGNAL_RUN_LAST, None, ()),
             }
 
-    def __init__(self):
+    def __init__(self, profile: object):
         """ Create a listbox to list all the settings.
 
         """
 
         super(SettingsManager, self).__init__()
+
+        self._profile = profile
 
         self._settings_grid = Gtk.Grid()
         self._settings_grid.set_row_spacing(3)
@@ -730,7 +882,7 @@ class SettingsManager(Gtk.Grid):
         self._clear_grid.attach(clear_cookies_button, 1, 0, 1, 1)
         self._clear_grid.show_all()
 
-        self.set_row_spacing(12)
+        self.set_row_spacing(6)
         self.attach(scroll, 0, 0, 5, 1)
         self.attach(self._clear_grid, 4, 1, 1, 1)
         self.set_margin_bottom(6)
@@ -739,6 +891,15 @@ class SettingsManager(Gtk.Grid):
         self.set_margin_end(6)
 
         self.show_all()
+
+        self.add_bool_setting('hide-address-bar',
+                              self._profile.hide_address_bar,
+                              'Auto Hide Address Bar',
+                              'Hide the address bar when it is not active.')
+        self.add_bool_setting('clear-on-exit', self._profile.clear_on_exit,
+                              'Clear All Data On Exit',
+                              'Clear cache, site database, and cookies on exit.')
+        self.add_settings(self._profile.web_view_settings)
 
     def add_settings(self, settings: dict):
         """ Add settings to the list.
@@ -842,7 +1003,16 @@ class SettingsManager(Gtk.Grid):
 
         """
 
-        self.emit('setting-changed', setting, switch.get_property(prop.name))
+        active = switch.get_property(prop.name)
+
+        if setting == 'clear-on-exit':
+            self._profile.clear_on_exit = active
+        elif setting == 'hide-address-bar':
+            self._profile.hide_address_bar = active
+            self.emit('setting-changed', setting, active)
+        else:
+            self._profile.web_view_settings[setting] = active
+            self.emit('setting-changed', setting, active)
 
     def show_clear_buttons(self, show: bool):
         """ Show the clear buttons.
@@ -868,43 +1038,59 @@ class SettingsManager(Gtk.Grid):
                 ctx.get_favicon_database().clear()
 
 
-class SearchSettings(Gtk.Grid):
-    """ Search engine list and settings.
+class ToggleListSettings(Gtk.Grid):
+    """ Creates a list of radio button options.  Each option has the ability to
+    be removed or edited.
 
     """
 
     __gsignals__ = {
-            'search-changed': (GObject.SIGNAL_RUN_LAST, None,
+            'changed': (GObject.SIGNAL_RUN_LAST, None,
                                (str, str, str)),
             'default-changed': (GObject.SIGNAL_RUN_LAST, None,
                                (str,)),
-            'search-added': (GObject.SIGNAL_RUN_LAST, None,
-                               (str, str)),
-            'search-removed': (GObject.SIGNAL_RUN_LAST, None,
+            'added': (GObject.SIGNAL_RUN_LAST, None,
+                         (str, str)),
+            'removed': (GObject.SIGNAL_RUN_LAST, None,
                                (str, str)),
             }
 
-    def __init__(self, search_dict: dict, parent: object = None):
-        """ Create a list for configuring search engines.
+    def __init__(self, options_dict: dict, parent: object = None):
+        """ Create a list for configuring options.
 
         """
 
-        super(SearchSettings, self).__init__()
+        super(ToggleListSettings, self).__init__()
 
         self._parent = parent
 
         self._last_radio = None
-        self._search_dict = search_dict
+        self._options_dict = options_dict
         self._default_name = ''
+        # self._default = ''
 
-        self._search_list = Gtk.ListBox()
-        self._search_list.set_vexpand(True)
-        self._search_list.set_hexpand(True)
+        # Change these.
+        # self._add_tooltip = 'Add Option'
+        # self._edit_tooltip = 'Edit Option'
+        # self._remove_tooltip = 'Remove Option'
+        # self._frame_text = 'Options Settings'
+        #
+        # self._add_title = 'Add Option'
+        # self._add_name_title = 'Add Name'
+        # self._add_uri_title = 'Add URI'
+        #
+        # self._edit_title = 'Edit Option'
+        # self._edit_name_title = 'Edit Name'
+        # self._edit_uri_title = 'Edit URI'
+
+        self._options_list = Gtk.ListBox()
+        self._options_list.set_vexpand(True)
+        self._options_list.set_hexpand(True)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_shadow_type(Gtk.ShadowType.IN)
-        scroll.add(self._search_list)
+        scroll.add(self._options_list)
         scroll.set_hexpand(True)
         scroll.set_vexpand(True)
 
@@ -912,7 +1098,7 @@ class SearchSettings(Gtk.Grid):
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         add_button = Gtk.Button()
-        add_button.set_tooltip_text('Add New Search Engine')
+        add_button.set_tooltip_text(self._add_tooltip)
         add_button.set_image(button_img)
         add_button.set_relief(Gtk.ReliefStyle.NONE)
         add_button.connect('clicked', self._add_clicked)
@@ -930,7 +1116,7 @@ class SearchSettings(Gtk.Grid):
         main_grid.set_margin_start(6)
         main_grid.set_margin_end(6)
 
-        frame_label = Gtk.Label('<b>Search Settings</b>')
+        frame_label = Gtk.Label('<b>{self._frame_text}</b>'.format(**locals()))
         frame_label.set_use_markup(True)
 
         frame = Gtk.Frame()
@@ -945,30 +1131,30 @@ class SearchSettings(Gtk.Grid):
 
         self.show_all()
 
-        for name, uri in sorted(search_dict.items()):
-            self.add_search(name, uri)
+        for name, uri in sorted(options_dict.items()):
+            self.add_options(name, uri)
 
     def _add_clicked(self, button: object):
-        """ Add a new search engine.
+        """ Add a new option.
 
         """
 
-        name_dialog = EntryDialog('Add Search', 'list-add-symbolic',
+        name_dialog = EntryDialog(self._add_title, 'list-add-symbolic',
                                   parent=self._parent, show_uri=True)
-        name_dialog.set_name_title('Enter Name')
-        name_dialog.set_uri_title('Edit Website URL')
+        name_dialog.set_name_title(self._add_name_title)
+        name_dialog.set_uri_title(self._add_uri_title)
         result = name_dialog.run()
         if not result: return None
 
-        self.add_search(result['name'], result['uri'])
-        self.emit('search-added', result['name'], result['uri'])
+        self.add_options(result['name'], result['uri'])
+        self.emit('added', result['name'], result['uri'])
 
-    def add_search(self, name: str, uri: str):
-        """ Add a search engine to the search_list.
+    def add_options(self, name: str, uri: str):
+        """ Add an option to the options_list.
 
         """
 
-        self._search_dict[name] = uri
+        self._options_dict[name] = uri
 
         radio_button = Gtk.RadioButton.new(None)
         radio_button.set_label(name)
@@ -980,7 +1166,7 @@ class SearchSettings(Gtk.Grid):
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         edit_button = Gtk.Button()
-        edit_button.set_tooltip_text('Edit Search Engine')
+        edit_button.set_tooltip_text(self._edit_tooltip)
         edit_button.set_image(button_img)
         edit_button.set_relief(Gtk.ReliefStyle.NONE)
 
@@ -989,7 +1175,7 @@ class SearchSettings(Gtk.Grid):
 
         remove_button = Gtk.Button()
         remove_button.set_margin_end(6)
-        remove_button.set_tooltip_text('Remove Search Engine')
+        remove_button.set_tooltip_text(self._remove_tooltip)
         remove_button.set_image(button_img)
         remove_button.set_relief(Gtk.ReliefStyle.NONE)
 
@@ -1001,31 +1187,29 @@ class SearchSettings(Gtk.Grid):
 
         self._last_radio = radio_button
 
-        self._search_list.add(button_grid)
+        self._options_list.add(button_grid)
         remove_button.connect('clicked', self._remove_clicked, button_grid,
                               radio_button)
         edit_button.connect('clicked', self._edit_clicked, radio_button)
 
-    def _remove_clicked(self, button: object, grid: object,
+    def _remove_clicked(self, remove_button: object, grid: object,
                         radio_button: object):
-        """ Remove this engine from the list.
+        """ Remove this option from the list.
 
         """
 
         name = radio_button.get_label()
-        uri = self._search_dict.pop(name, None)
+        uri = self._options_dict.pop(name, None)
 
-        for child in self._search_list.get_children():
-            if grid in child.get_children():
-                self._search_list.remove(child)
-                break
+        self._options_list.remove(grid.get_parent())
 
         if self._last_radio == radio_button:
-            self._last_radio = None
             for button in radio_button.get_group():
                 if button != radio_button:
                     self._last_radio = button
                     break
+            else:
+                self._last_radio = None
 
         # Remove from group.
         radio_button.join_group(None)
@@ -1033,59 +1217,60 @@ class SearchSettings(Gtk.Grid):
         if self._default_name == name:
             if self._last_radio:
                 self.set_default(self._last_radio.get_label())
-        self.emit('search-removed', name, uri)
+        self.emit('removed', name, uri)
 
     def _edit_clicked(self, button: object, radio_button: object):
-        """ Remove this engine from the list.
+        """ Remove this option from the list.
 
         """
 
         name = radio_button.get_label()
-        uri = self._search_dict.pop(name)
+        uri = self._options_dict.pop(name)
 
-        name_dialog = EntryDialog('Add Search', 'list-add-symbolic',
+        name_dialog = EntryDialog(self._edit_title, 'list-add-symbolic',
                                   parent=self._parent, show_uri=True)
-        name_dialog.set_name_title('Enter Name')
+        name_dialog.set_name_title(self._edit_name_title)
         name_dialog.set_default_name(name)
-        name_dialog.set_uri_title('Edit Website URL')
+        name_dialog.set_uri_title(self._edit_uri_title)
         name_dialog.set_default_uri(uri)
         result = name_dialog.run()
-        if not result: return None
-
-        self._search_dict[result['name']] = result['uri']
-        radio_button.set_label(result['name'])
-        if self._default_name == name:
-            self.set_default(result['name'])
-        self.emit('search-changed', name, result['name'], result['uri'])
+        if not result:
+            self._options_dict[name] = uri
+        else:
+            self._options_dict[result['name']] = result['uri']
+            radio_button.set_label(result['name'])
+            if self._default_name == name:
+                self.set_default(result['name'])
+            self.emit('changed', name, result['name'], result['uri'])
 
     def set_default(self, name: str):
-        """ Set the default search engine.
+        """ Set the default option.
 
         """
 
         if self._last_radio:
-            if name in self._search_dict:
+            if name in self._options_dict:
                 self._default_name = name
                 for radio in self._last_radio.get_group():
                     if radio.get_label() == name:
                         radio.set_active(True)
                         break
-                self.emit('default-changed', self._search_dict[name])
+                self.emit('default-changed', self._options_dict[name])
 
     def get_all(self):
-        """ Return the dict of search engines.
+        """ Return the dict of options engines.
 
         """
 
-        return self._search_dict
+        return self._options_dict
 
     def get_default(self):
         """ Return the default.
 
         """
 
-        return self._search_dict.get(self._default_name,
-                                     'https://startpage.com/do/search?query=%s')
+        return self._options_dict.get(self._default_name, self._default)
+
     def get_default_name(self):
         """ Return the default name.
 
@@ -1100,6 +1285,64 @@ class SearchSettings(Gtk.Grid):
 
         if radio_button.get_active():
             name = radio_button.get_label()
-            if name in self._search_dict:
+            if name in self._options_dict:
                 self._default_name = name
-                self.emit('default-changed', self._search_dict[name])
+                self.emit('default-changed', self._options_dict[name])
+
+
+class AgentSettings(ToggleListSettings):
+    """ User Agent list and settings.
+
+    """
+
+    def __init__(self, agent_dict: dict, parent: object = None):
+        """ Create a list for configuring agent engines.
+
+        """
+
+        self._default = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36'
+
+        # Change these.
+        self._add_tooltip = 'Add User Agent'
+        self._edit_tooltip = 'Edit User Agent'
+        self._remove_tooltip = 'Remove User Agent'
+        self._frame_text = 'User Agent Settings'
+
+        self._add_title = 'Add User Agent'
+        self._add_name_title = 'Enter Name'
+        self._add_uri_title = 'Enter User Agent String'
+
+        self._edit_title = 'Edit User Agent'
+        self._edit_name_title = 'Edit Name'
+        self._edit_uri_title = 'Edit User Agent String'
+
+        super(AgentSettings, self).__init__(agent_dict, parent)
+
+
+class SearchSettings(ToggleListSettings):
+    """ Search engine list and settings.
+
+    """
+
+    def __init__(self, search_dict: dict, parent: object = None):
+        """ Create a list for configuring search engines.
+
+        """
+
+        self._default = 'https://startpage.com/do/search?query=%s'
+
+        # Change these.
+        self._add_tooltip = 'Add New Search Engine'
+        self._edit_tooltip = 'Edit Search Engine'
+        self._remove_tooltip = 'Remove Search Engine'
+        self._frame_text = 'Search Settings'
+
+        self._add_title = 'Add Search'
+        self._add_name_title = 'Enter Name'
+        self._add_uri_title = 'Enter Website URL (%s = search term)'
+
+        self._edit_title = 'Edit Search'
+        self._edit_name_title = 'Edit Name'
+        self._edit_uri_title = 'Edit Website URL'
+
+        super(SearchSettings, self).__init__(search_dict, parent)

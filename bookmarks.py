@@ -717,7 +717,6 @@ class EntryDialog(GObject.GObject):
 
         self._window = Gtk.Window()
         self._window.set_type_hint(Gdk.WindowTypeHint.DIALOG)
-        self._window.set_focus(self._name_entry)
         self._window.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
         self._window.set_default(ok_button)
         self._window.set_size_request(300, -1)

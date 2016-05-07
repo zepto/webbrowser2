@@ -29,6 +29,7 @@ import tempfile
 import subprocess
 import logging
 import codecs
+import urllib.parse
 from multiprocessing import Pipe, Process
 from multiprocessing import current_process
 from gi import require_version as gi_require_version
@@ -37,7 +38,7 @@ gi_require_version('WebKit2', '4.0')
 from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio
 
 from functions import looks_like_uri
-from classes import ChildDict, Config
+from classes import ChildDict
 
 
 class BrowserProc(object):
@@ -69,27 +70,20 @@ class BrowserProc(object):
 
         self._fallback_search = 'https://startpage.com/do/search?query=%s'
 
-        self._dict = com_dict
         self._private = com_dict.pop('private', True)
         self._web_view_settings = com_dict.pop('web-view-settings', {})
         self._search_url = com_dict.pop('search-url', self._fallback_search)
+        self._web_view_settings['user-agent'] = com_dict.get('user-agent', '')
 
         self._pid = current_process().pid
 
         self._windows = []
-        view_dict = {}
 
-        for socket_id, com_pipe in self._dict.items():
-            logging.info("CREATING: {socket_id} {com_pipe}".format(**locals()))
-            try:
-                com_pipe.send(('pid', self._pid))
-                com_pipe.send(('private', self._private))
-            except BrokenPipeError as err:
-                logging.error("BROKEN PIPE: {err} on PIPE {com_pipe}".format(**locals()))
-                continue
-            view_dict = self._create_window(socket_id, com_pipe,
-                                            view_dict.get('webview', None))
-            self._windows.append(view_dict)
+        socket_id, com_pipe = com_dict['socket-id'], com_dict['com-pipe']
+        logging.info("CREATING: {socket_id} {com_pipe}".format(**locals()))
+        view_dict = self._create_window(socket_id, com_pipe)
+        view_dict.load(com_dict.get('uri', 'about:blank'))
+        self._windows.append(view_dict)
 
     def _new_webview(self, webview: object = None):
         """ Create a new webview.
@@ -98,8 +92,7 @@ class BrowserProc(object):
 
         logging.info("PRIVATE: {self._private}".format(**locals()))
 
-        if webview:
-            return webview.new_with_related_view()
+        if webview: return webview.new_with_related_view()
 
         ctx = WebKit2.WebContext.get_default()
         ctx.set_process_model(WebKit2.ProcessModel.MULTIPLE_SECONDARY_PROCESSES)
@@ -116,29 +109,8 @@ class BrowserProc(object):
         if self._private:
             ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
             settings.set_property('enable-private-browsing', True)
-            # settings.set_property('enable-page-cache', False)
-            # settings.set_property('enable-dns-prefetching', False)
-            # settings.set_property('enable-html5-database', False)
-            # # settings.set_property('enable-html5-local-storage', False)
-            # settings.set_property('enable-offline-web-application-cache',
-            #                       False)
-            # settings.set_property('enable-hyperlink-auditing', True)
-            # settings.set_property('enable-media-stream', False)
         else:
             ctx.set_favicon_database_directory()
-
-        # settings.set_property('enable-java', False)
-        # settings.set_property('enable-plugins', False)
-        # settings.set_property('enable-mediasource', True)
-        # settings.set_property('enable-javascript', True)
-        # settings.set_property('enable-webaudio', True)
-        # settings.set_property('enable-webgl', True)
-        # settings.set_property('enable-accelerated-2d-canvas', True)
-        # settings.set_property('enable-developer-extras', True)
-        # Chromium user agent string.
-        # settings.set_property('user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36')
-        # Firefox user agent string.
-        # settings.set_property('user-agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:45.0) Gecko/20100101 Firefox/45.0')
 
         return webview
 
@@ -177,21 +149,22 @@ class BrowserProc(object):
             'recv': com_pipe.recv,
             'grab_focus': webview.grab_focus,
             'update-status': lambda info: self._update_status(view_dict, info),
-            'load': lambda data: self._load(data, view_dict),
+            'load': lambda data: self._load(view_dict, data),
             'restore-session': lambda data: self._restore_session(data, view_dict),
             'send-session': lambda: self._send_session(view_dict),
+            'get-session': lambda: self._get_session(view_dict),
             'search-url': self._search_url,
             'status-label': status_label,
             'webview': webview,
             'overlay': overlay,
             'socket-id': socket_id,
             'com-pipe': com_pipe,
-            'com-dict': self._dict,
             'find-controller': find_controller,
             'find-options': WebKit2.FindOptions.CASE_INSENSITIVE |
                             WebKit2.FindOptions.WRAP_AROUND,
-            'blank-page': lambda: self._is_blank(view_dict),
+            'is-blank-page': lambda: self._is_blank(view_dict),
             'webview-sig-ids': [],
+            'session': b'',
             })
 
         if socket_id: view_dict['plug'] = self._create_plug(view_dict)
@@ -260,10 +233,12 @@ class BrowserProc(object):
         except BrokenPipeError as err:
             logging.error("PIPE BROKE CLOSING: {err}".format(**locals()))
 
-    def _restore_session(self, session_data: bytes, view_dict: dict):
+    def _restore_session(self, session_data: bytes, view_dict: dict) -> bool:
         """ Restores the session for view_dict.
 
         """
+
+        if not session_data: return False
 
         logging.info('Restoring session...')
 
@@ -281,6 +256,8 @@ class BrowserProc(object):
 
         logging.info('Session restored.')
 
+        return True
+
     def _send_session(self, view_dict: dict):
         """ Send the session data for the webview in view_dict.
 
@@ -288,17 +265,23 @@ class BrowserProc(object):
 
         logging.info('Sending session data...')
 
+        view_dict.send('session-data', view_dict.get_session())
+
+        logging.info('Sent session data.')
+
+    def _get_session(self, view_dict: dict):
+        """ Return the session_data base64 encoded.
+
+        """
+
         webview = view_dict.webview
-        uri = webview.get_uri()
         session_data = b''
 
-        if not view_dict.blank_page():
+        if not view_dict.is_blank_page():
             session_bytes = webview.get_session_state().serialize()
             session_data = codecs.encode(session_bytes.get_data(), 'base64')
 
-        view_dict.send('session-data', session_data.decode())
-
-        logging.info('Sent session data.')
+        return session_data.decode()
 
     def _is_blank(self, view_dict: dict):
         """ Return True if the webview in view_dict is an empty session.
@@ -309,6 +292,7 @@ class BrowserProc(object):
         uri = webview.get_uri()
         logging.info('IS BLANK {uri} {back} {forward}'.format(uri=uri,
             back=webview.can_go_back(), forward=webview.can_go_forward()))
+
         return not (webview.can_go_back() or webview.can_go_forward() or
                     (uri and uri != 'about:blank'))
 
@@ -321,16 +305,18 @@ class BrowserProc(object):
         for sig_id in view_dict.webview_sig_ids:
             view_dict.webview.disconnect(sig_id)
 
+        # Store the session data so it will be sent when the tab is
+        # closed.
+        view_dict.session = {
+                'session-data': view_dict.get_session(),
+                'title': view_dict.webview.get_title(),
+                'uri': view_dict.webview.get_uri(),
+                }
+
         # Try to make web_view clear up all memory before destroying.
         view_dict.webview.stop_loading()
         view_dict.webview.load_uri('about:blank')
-
-        # Remove the webview from the overlay before destroying it.
         view_dict.overlay.remove(view_dict.webview)
-
-        # Wait for the webview to be destroyed.
-        view_dict.webview.destroy()
-        while view_dict.webview.get_window(): pass
 
         # Finally destory the plug.
         view_dict.plug.destroy()
@@ -343,11 +329,7 @@ class BrowserProc(object):
 
         """
 
-        com_pipe = self._dict.pop(view_dict['socket-id'])
-
-        logging.info('Destorying: {view_dict.socket_id}'.format(**locals()))
-
-        send_dict = {'pid': self._pid, 'socket-id': view_dict['socket-id']}
+        logging.info('Destroying: {view_dict.socket_id}'.format(**locals()))
 
         self._windows.remove(view_dict)
 
@@ -356,22 +338,21 @@ class BrowserProc(object):
             for f in self._tmp_files: f.close()
 
             logging.info("Destroying: {self._pid}".format(**locals()))
-            try:
-                com_pipe.send(('terminate', send_dict))
-            except BrokenPipeError as err:
-                logging.error("PIPE BROKE CLOSING: {err}".format(**locals()))
-
             Gtk.main_quit()
-
             logging.info('{self._pid} CLOSED'.format(**locals()))
 
+        send_dict = {
+                'session': view_dict.session,
+                'is-last': len(self._windows) == 0,
+                }
         try:
-            com_pipe.send(('closed', send_dict))
+            view_dict.send('closed', send_dict)
         except BrokenPipeError as err:
             logging.error("PIPE BROKE CLOSING: {err}".format(**locals()))
 
         logging.info("CLOSED {view_dict.webview}".format(**locals()))
-        com_pipe.close()
+        view_dict.com_pipe.close()
+        view_dict.clear()
 
     def _recieve(self, source: int, cb_condition: int, view_dict: dict):
         """ Recieve signals from outside.
@@ -379,16 +360,15 @@ class BrowserProc(object):
         """
 
         logging.debug("IN RECIEVE: {view_dict.com_pipe}".format(**locals()))
-        logging.debug("CHILD_DICT: {self._dict}".format(**locals()))
 
         signal, data = view_dict.recv()
+
         if signal in ['restore-session']:
             logging.debug('SIGNAL: {signal}, DATA: {data}'.format(**locals()))
         else:
             logging.info('SIGNAL: {signal}, DATA: {data}'.format(**locals()))
 
         if signal == 'close' and data:
-            view_dict.send_session()
             view_dict.plug.emit('delete-event', None)
             return False
 
@@ -400,12 +380,9 @@ class BrowserProc(object):
 
         if signal == 'new-tab':
             new_win = self._new_tab(view_dict, data)
-            uri = data.get('uri', 'about:blank')
-            if uri != 'about:blank':
-                new_win.load(uri)
+            new_win.load(data.get('uri', 'about:blank'))
 
         if signal == 'socket-id':
-            self._dict[data] = view_dict.com_pipe
             view_dict['socket-id'] = data
             view_dict['plug'] = self._create_plug(view_dict)
 
@@ -443,7 +420,7 @@ class BrowserProc(object):
         if signal == 'restore-session':
             webview = view_dict.webview
             uri = webview.get_uri()
-            if view_dict.blank_page():
+            if view_dict.is_blank_page():
                 view_dict.restore_session(data['session-data'])
             else:
                 new_win = self._new_tab(view_dict, data)
@@ -472,9 +449,11 @@ class BrowserProc(object):
                 'uri': data.get('uri', 'about:blank'),
                 'pid': self._pid,
                 'com-pipe': com_pipe,
-                'com-dict': self._dict,
+                'child-pipe': proc_pipe,
                 'focus': data.get('focus', False),
                 'private': data.get('private', self._private),
+                'index': data.get('index', -1),
+                'order': data.get('order', 0),
                 }
         view_dict.send('tab-info', info_dict)
 
@@ -514,9 +493,9 @@ class BrowserProc(object):
             # Allways allow searching for selected text.
             action = Gtk.Action('search-web', 'Search for selection in' + type_str,
                                 'Search web for selection.', '')
-            icon = Gio.ThemedIcon.new_with_default_fallbacks('find-location-symbolic')
+            icon = Gio.ThemedIcon.new_with_default_fallbacks('edit-find-symbolic')
             action.set_gicon(icon)
-            action.connect('activate', self._open_selection, selected_text,
+            action.connect('activate', self._context_activate, selected_text,
                            view_dict, event.state)
             menu_item = WebKit2.ContextMenuItem.new(action)
             menu.prepend(WebKit2.ContextMenuItem.new_separator())
@@ -529,18 +508,20 @@ class BrowserProc(object):
                                     '')
                 icon = Gio.ThemedIcon.new_with_default_fallbacks('go-jump-symbolic')
                 action.set_gicon(icon)
-                action.connect('activate', self._open_selection, selected_text,
+                action.connect('activate', self._context_activate, selected_text,
                             view_dict, event.state)
                 menu_item = WebKit2.ContextMenuItem.new(action)
                 menu.append(WebKit2.ContextMenuItem.new_separator())
                 menu.append(menu_item)
 
+        # Allow viewing the source of any webpage except a blank or
+        # about:blank page.
         if webview.get_uri() and webview.get_uri() != 'about:blank':
             action = Gtk.Action('view-source', 'View Source', 'View Source',
                                 '')
             icon = Gio.ThemedIcon.new_with_default_fallbacks('text-editor-symbolic')
             action.set_gicon(icon)
-            action.connect('activate', self._open_selection, '', view_dict)
+            action.connect('activate', self._context_activate, '', view_dict)
             menu_item = WebKit2.ContextMenuItem.new(action)
             menu.append(menu_item)
 
@@ -623,9 +604,9 @@ class BrowserProc(object):
                 }
         view_dict.send('download', info_dict)
 
-    def _open_selection(self, action: object, selected_text: str,
+    def _context_activate(self, action: object, selected_text: str,
                         view_dict: dict, flags: object = None):
-        """ Open a new tab searching for the selection.
+        """ Handle custom context menu actions.
 
         """
 
@@ -635,6 +616,7 @@ class BrowserProc(object):
             return True
 
         if action.get_name() == 'search-web':
+            selected_text = urllib.parse.quote(selected_text)
             try:
                 selected_text = view_dict.search_url % selected_text
             except TypeError:
@@ -651,29 +633,36 @@ class BrowserProc(object):
 
         return True
 
-    def _load(self, data: str, view_dict: dict):
+    def _load(self, view_dict: dict, data: str):
         """ Load the data in the webview in view_dict.
 
         """
 
+        data = data.strip()
+
+        if data == 'about:blank': return data
+
         webview = view_dict.webview
 
         if '\n' not in data:
-            # Data doesn't look like a uri so treat it as a search
-            # string.
             if not looks_like_uri(data):
+                # Data doesn't look like a uri so treat it as a search
+                # string.
                 try:
                     data = view_dict.search_url % data
                 except TypeError:
                     data = self._fallback_search % data
             # Data looks like a uri but it doesn't start with
             # somthing:// so prepend http:// to it.
-            if ':' not in data: data = 'http://%s' % data
+            if not data.startswith(('http://', 'https://', 'ftp://')):
+                data = 'http://%s' % data
 
             webview.load_uri(data)
 
             webview.grab_focus()
             view_dict.send('title', data)
+
+        return data
 
     def _resource_started(self, webview: object, resource: object,
                           request: object, view_dict: dict):
@@ -780,7 +769,7 @@ class BrowserProc(object):
 
             if view_dict.webview.is_loading():
                 # Show a loading status.
-                view_dict.update_status('(request) {uri}...'.format(**locals()))
+                view_dict.update_status('Request: {uri}...'.format(**locals()))
         elif decision_type == WebKit2.PolicyDecisionType.RESPONSE:
             response = decision.get_response()
             http_headers = response.get_http_headers()
@@ -812,7 +801,7 @@ class BrowserProc(object):
 
             if view_dict.webview.is_loading():
                 # Show a loading status.
-                view_dict.update_status('(response) {uri}...'.format(**locals()))
+                view_dict.update_status('Response: {uri}...'.format(**locals()))
         else:
             logging.info("UNKNOWN: {decision} {decision_type}".format(**locals()))
 
@@ -927,6 +916,9 @@ class BrowserProc(object):
 
         """
 
+        # Send the session.
+        view_dict.send_session()
+
         def build_list(hist_list: object) -> list:
             """ for each item is hist_list add the data to a dictionary and
             append that to a list.  Return the resulting list of dictionaries.
@@ -960,6 +952,7 @@ class BrowserProc(object):
 
         view_dict.send('back-forward-list', (back_dict_list, current_dict,
                                              forward_dict_list))
+
         return False
 
     def _verify_view(self, view_dict: dict):
@@ -1104,4 +1097,5 @@ class BrowserProc(object):
 
         """
 
-        view_dict.send_session()
+        view_dict.send('crashed', view_dict.get_session())
+        view_dict.restore_session(view_dict.get_session())

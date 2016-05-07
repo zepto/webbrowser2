@@ -36,11 +36,8 @@ def looks_like_uri(test_text: str):
 
     """
 
-    if not test_text.startswith(('http://', 'https://', 'ftp://',
-                                    'file://', 'mailto:', 'javascript:',
-                                    'about:blank')):
-        if ' ' in test_text or '.' not in test_text or not test_text:
-            return False
+    if ' ' in test_text.strip() or '.' not in test_text or not test_text:
+        return False
 
     return True
 
@@ -69,7 +66,8 @@ def save_dialog(filename: str, folder: str, parent: object,
     """
 
     dialog = Gtk.FileChooserDialog(title, parent, Gtk.FileChooserAction.SAVE,
-            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT))
+                                   (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                                    Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT))
     dialog.set_do_overwrite_confirmation(True)
     dialog.set_current_name(filename)
     dialog.set_current_folder(folder)

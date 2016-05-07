@@ -24,6 +24,7 @@
 """
 
 import os
+import sys
 import re
 import math
 import pathlib
@@ -39,8 +40,9 @@ gi_require_version('WebKit2', '4.0')
 from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GdkPixbuf
 
 from functions import looks_like_uri, get_config_path, save_dialog
-from classes import ChildDict, SettingsMenu, Config, SettingsPopover
-from classes import SettingsManager, SessionManager, DownloadManager, SearchSettings
+from classes import ChildDict, Profile, SettingsPopover, SearchSettings
+from classes import SettingsManager, SessionManager, DownloadManager
+from classes import AgentSettings
 from bookmarks import BookmarkMenu
 
 
@@ -49,56 +51,26 @@ class MainWindow(object):
 
     """
 
-    def __init__(self, com_pipe: object, com_dict: object,
-                 uri_list: list = ['about:blank'], profile: str = 'default'):
+    def __init__(self, com_pipe: object, uri_list: list = ['about:blank'],
+                 profile: str = 'default'):
         """ Initialize the process.
 
 
         """
 
-        self._config = Config(profile)
-        self._bookmarks_file = self._config.bookmarks_file
+        self._is_closing = False
 
-        self._socket = self._config.open_socket(uri_list)
+        self._profile = Profile(profile)
+        self._socket = self._profile.open_socket(uri_list)
         if not self._socket:
             com_pipe.send(('quit', True))
             return None
 
         self._name = 'Web Browser'
-        self._find_str = self._config.get('find-str', '')
-        self._clear_on_exit = self._config.get('clear-on-exit', True)
 
-        search_dict = self._config.get('search', {
-            'StartPage': 'https://startpage.com/do/search?query=%s',
-            })
-        default_search = self._config.get('default-search', 'StartPage')
-
-        self._web_view_settings = self._config.get('web-view-settings', {
-            'enable-page-cache': False,
-            'enable-dns-prefetching': False,
-            'enable-html5-database': False,
-            'enable-html5-local-storage': False,
-            'enable-offline-web-application-cache': False,
-            'enable-hyperlink-auditing': True,
-            'enable-media-stream': False,
-            'enable-java': False,
-            'enable-plugins': False,
-            'enable-mediasource': True,
-            'enable-javascript': True,
-            'enable-webaudio': True,
-            'enable-webgl': True,
-            'enable-accelerated-2d-canvas': True,
-            'enable-developer-extras': True,
-            'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36',
-            })
-
-        self._revived = []
         self._pid_map = {}
-        self._events = []
-        self._fixed_address_bar = self._config.get('fixed-address-bar', True)
-
+        self._sig_ids = []
         self._windows = {}
-        self._closed = {}
 
         screen = Gdk.Screen.get_default()
         width = screen.get_width() // 2
@@ -140,17 +112,17 @@ class MainWindow(object):
 
         accel_dict = {
                 ('<Ctrl>t', '<Control><Alt>t', '<Ctrl><Shift>t'): self._new_tab,
-                ('<Ctrl>w',): self._close_tab,
+                ('<Ctrl>w', '<Control><Alt>w'): self._close_tab_key,
                 ('<Ctrl><Alt>r',): lambda *a: com_pipe.send(('refresh', True)),
-                ('<Ctrl>l',): self._focus_address_entry,
-                ('<Ctrl>m',): lambda *a: self._minimize_tab(self._get_current_child()),
-                ('<Ctrl>h',): lambda *a: self._hide_tab(self._get_current_child()),
+                ('<Ctrl>l',): self._focus_address_entry_key,
+                ('<Ctrl>m',): lambda *a: self._minimize_tab(self._get_child_dict()),
+                ('<Ctrl>h',): lambda *a: self._hide_tab(self._get_child_dict()),
                 ('<Ctrl>f',): self._findbar_toggle,
                 ('<Ctrl>d',): lambda *a: self._bookmark_menu.bookmark_page(),
                 ('<Ctrl>y',): self._yank_hover,
                 ('<Ctrl>g', '<Ctrl><Shift>g'): self._find_next_key,
                 ('Escape',): self._escape,
-                ('<Ctrl>r', 'F5'): lambda *a: self._get_current_child().send('refresh', True),
+                ('<Ctrl>r', 'F5'): lambda *a: self._get_child_dict().send('refresh', True),
                 }
         for accel_tup, func in accel_dict.items():
             for accel in accel_tup:
@@ -162,14 +134,14 @@ class MainWindow(object):
             self._accels.connect(Gdk.keyval_from_name(str(i)),
                                  Gdk.ModifierType.MOD1_MASK,
                                  Gtk.AccelFlags.VISIBLE,
-                                 self._switch_tab)
+                                 self._switch_tab_key)
 
         self._window = Gtk.Window()
         self._window.set_title(self._name)
         self._window.add_accel_group(self._accels)
         self._window.set_size_request(500, 540)
-        self._window.set_default_size(self._config.get('width', width),
-                                      self._config.get('height', height))
+        self._window.set_default_size(self._profile.get('width', width),
+                                      self._profile.get('height', height))
         self._window.set_resizable(True)
         self._window.set_icon_name('web-browser')
         self._window.connect('motion-notify-event', self._mouse_move)
@@ -190,36 +162,40 @@ class MainWindow(object):
         start_action_box.attach(new_button, 0, 0, 1, 1)
         start_action_box.show_all()
 
-        self._search_settings = SearchSettings(search_dict, self._window)
-        self._search_settings.set_default(default_search)
-        self._search_settings.connect('default-changed', self._default_search_changed)
-        self._search_settings.connect('search-changed', lambda *a: self._save_config())
-        self._search_settings.connect('search-added', lambda *a: self._save_config())
-        self._search_settings.connect('search-removed', lambda *a: self._save_config())
+        self._agent_settings = AgentSettings(self._profile.user_agents,
+                                             self._window)
+        self._agent_settings.set_default(self._profile.default_user_agent)
+        self._agent_settings.connect('default-changed', self._default_agent_changed)
+        self._agent_settings.connect('changed', lambda *a: self._save_config())
+        self._agent_settings.connect('added', lambda *a: self._save_config())
+        self._agent_settings.connect('removed', lambda *a: self._save_config())
 
-        self._settings_manager = SettingsManager()
-        self._settings_manager.add_bool_setting('clear-on-exit',
-                                           self._clear_on_exit,
-                                           'Clear All Data On Exit',
-                                           'Clear the cache, favicon database, and cookies on exit.')
-        self._settings_manager.add_settings(self._web_view_settings)
+        self._search_settings = SearchSettings(self._profile.search,
+                                               self._window)
+        self._search_settings.set_default(self._profile.default_search)
+        self._search_settings.connect('default-changed', self._default_search_changed)
+        self._search_settings.connect('changed', lambda *a: self._save_config())
+        self._search_settings.connect('added', lambda *a: self._save_config())
+        self._search_settings.connect('removed', lambda *a: self._save_config())
+
+        self._settings_manager = SettingsManager(self._profile)
+        self._settings_manager.add_custom_setting(self._agent_settings)
         self._settings_manager.add_custom_setting(self._search_settings)
         self._settings_manager.show_clear_buttons(True)
-        self._settings_manager.connect('setting-changed', self._web_view_settings_changed)
+        self._settings_manager.connect('setting-changed',
+                                       self._settings_changed)
 
-        self._session_manager = SessionManager()
-        self._session_manager.connect('restore-session', self._restore_session_cb)
+        self._session_manager = SessionManager(self._profile)
+        self._session_manager.connect('restore-session',
+                                      self._restore_session_cb)
 
         self._download_manager = DownloadManager(self._window)
 
         self._main_popover = SettingsPopover()
+        self._main_popover.set_size_request(500, 500)
         self._main_popover.add_tab(self._settings_manager, 'Settings')
         self._main_popover.add_tab(self._session_manager, 'Closed Sessions')
         self._main_popover.add_tab(self._download_manager, 'Downloads')
-        # self._main_popover.set_modal(False)
-        width, height = self._window.get_size()
-        self._main_popover.set_size_request(500, 500)
-        # self._main_popover.set_transitions_enabled(True)
 
         icon = Gio.ThemedIcon.new_with_default_fallbacks('open-menu-symbolic')
         menu_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
@@ -240,7 +216,7 @@ class MainWindow(object):
         self._tabs.add_events(Gdk.EventMask.SCROLL_MASK)
         self._tabs.connect('page-reordered', self._tab_reordered)
         self._tabs.connect('page-removed', self._tab_removed)
-        self._events.append((self._tabs,
+        self._sig_ids.append((self._tabs,
                              self._tabs.connect('switch-page',
                                                 self._tab_switched)))
         self._tabs.connect('scroll-event', self._tab_scrolled)
@@ -253,33 +229,24 @@ class MainWindow(object):
         self._window.add(window_grid)
         self._window.show_all()
 
-        self._bookmark_menu = BookmarkMenu(self._bookmarks_file, self._window)
+        self._bookmark_menu = BookmarkMenu(self._profile.bookmarks_file, self._window)
         self._bookmark_menu.connect('bookmark-release-event', self._bookmark_release)
         self._bookmark_menu.connect('open-folder', self._bookmark_open_folder)
         self._bookmark_menu.connect('new-bookmark', self._bookmark_new)
         self._bookmark_menu.connect('tab-list', self._bookmark_tab_list)
 
         self._pipe = com_pipe
-        self._dict = com_dict
 
         self._recv = self._pipe.recv
 
-        GLib.io_add_watch(self._pipe.fileno(), GLib.IO_IN,
-                                self._recieve)
+        GLib.io_add_watch(self._pipe.fileno(), GLib.IO_IN, self._recieve)
 
-        with pathlib.Path(self._config.sessions_file) as sessions_file:
-            tmp_dict = {}
-            if sessions_file.exists():
-                tmp_dict = json_loads(sessions_file.read_text())
-                sessions_file.unlink()
-            sessions = tmp_dict.get('sessions', [])
-            self._last_tab = tmp_dict.get('last-tab', [])
-
-        self._restore_session_list(sessions)
+        # Recover the previous session.
+        self._session_manager.restore_all()
 
         for uri in uri_list:
             if not self._windows and uri == 'about:blank':
-                pid = self._new_proc(self._make_tab(uri=uri, focus=True)[0])
+                self._new_proc(*self._make_tab(uri=uri, focus=True))
 
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
                           self._handle_extern_signal)
@@ -291,18 +258,20 @@ class MainWindow(object):
         """
 
         main_pipe, child_pipe = Pipe()
-        com_dict = Manager().dict({
-            'private': private,
-            'web-view-settings': self._web_view_settings,
-            'search-url': self._search_settings.get_default(),
-            })
+        socket_id, child = self._add_tab(main_pipe, child_pipe, focus, uri=uri,
+                                         index=index, private=private)
 
-        socket_id, child = self._add_tab(main_pipe, com_dict, focus, uri=uri,
-                                         index=index)
+        init_dict = {
+                'uri': uri,
+                'private': private,
+                'web-view-settings': self._profile.web_view_settings,
+                'search-url': self._search_settings.get_default(),
+                'user-agent': self._agent_settings.get_default(),
+                'com-pipe': child_pipe,
+                'socket-id': socket_id,
+                }
 
-        com_dict[socket_id] = child_pipe
-
-        return com_dict, child
+        return init_dict, child
 
     def save_config(func):
         """ Wrap button release events.
@@ -321,17 +290,30 @@ class MainWindow(object):
         return wrapper
 
     @save_config
-    def _web_view_settings_changed(self, settings_manager: object, setting: str,
-                                   value: object):
+    def _settings_changed(self, settings_manager: object, setting: str,
+                          value: object):
         """ Send the changes to all children processes.
 
         """
 
-        if setting == 'clear-on-exit':
-            self._config[setting] = value
+        if setting == 'hide-address-bar':
+            for child in self._windows.values():
+                if value:
+                    child.tab_grid.remove(child.address_bar)
+                    child.overlay.add_overlay(child.address_bar)
+                else:
+                    child.overlay.remove(child.address_bar)
+                    child.tab_grid.attach(child.address_bar, 0, 0, 1, 1)
         else:
-            self._web_view_settings[setting] = value
             self._send_all('web-view-settings', (setting, value))
+
+    @save_config
+    def _default_agent_changed(self, agent_settings: object, agent: str):
+        """ Set the default search engine.
+
+        """
+
+        self._send_all('web-view-settings', ('user-agent', agent))
 
     @save_config
     def _default_search_changed(self, search_settings: object, uri: str):
@@ -348,8 +330,8 @@ class MainWindow(object):
         """
 
         width, height = window.get_size()
-        self._config['width'] = width
-        self._config['height'] = height
+        self._profile['width'] = width
+        self._profile['height'] = height
 
         return False
 
@@ -367,7 +349,7 @@ class MainWindow(object):
 
         """
 
-        child.socket.disconnect(child['plug-removed'])
+        for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
 
         try:
             child.send('close', True)
@@ -382,18 +364,27 @@ class MainWindow(object):
         logging.info("DELETE EVENT: {event}".format(**locals()))
 
         if not event:
+            if self._is_closing:
+                # Save all open sessions before closing them.
+                self._session_manager.save_sessions()
+            self._session_manager.close()
             # No event means that the tab-removed callback triggered
             # this event, so destroy the window.
             self._window.destroy()
             return False
         else:
             # Disconnect some event handlers.
-            for widget, event_id in self._events: widget.disconnect(event_id)
+            for widget, sig_id in self._sig_ids: widget.disconnect(sig_id)
 
-            # Save all open sessions before closing them.
-            self._save_sessions(self._config.sessions_file)
+            self._session_manager.clear()
+            self._is_closing = True
+
+            # Just store the tab layout, and wait for the tab to close
+            # to store the session data.
+            for child in self._windows.values(): child.update_session({})
 
             logging.info("CLOSING ALL TABS")
+
             # Send the close signal to all tabs.
             for child in self._windows.values(): child.close()
 
@@ -401,6 +392,7 @@ class MainWindow(object):
         # closed.
         return True
 
+    @save_config
     def _destroy(self, window: object):
         """ Quit
 
@@ -408,11 +400,13 @@ class MainWindow(object):
 
         logging.info("DESTROY")
 
-        # Clear all cache and cookies.
-        self._settings_manager.clear('all')
+        if self._profile.clear_on_exit:
+            # Clear all cache and cookies.
+            self._settings_manager.clear('all')
 
-        # Save the config.
-        self._save_config()
+        if self._profile.crash_file.exists():
+            # Delete the file, because the program didn't crash.
+            self._profile.crash_file.unlink()
 
         self._download_manager.cancel_all()
 
@@ -420,7 +414,7 @@ class MainWindow(object):
         self._send('quit', True)
 
         # Close and remove the socket file.
-        self._config.close_socket()
+        self._profile.close_socket()
 
     def run(self):
         """ Run Gtk.main()
@@ -434,31 +428,11 @@ class MainWindow(object):
 
         """
 
-        self._config['web-view-settings'] = self._web_view_settings
-        self._config['search'] = self._search_settings.get_all()
-        self._config['default-search'] = self._search_settings.get_default_name()
-        self._config.save_config()
-
-    def _save_sessions(self, filename: str):
-        """ Save all open tabs sessions to filename.
-
-        """
-
-        # Save all open sessions.
-        sessions = []
-        for child in self._windows.values():
-            child.send('get-session', True)
-            signal, data = child.recv()
-            logging.info("GETTING SESSION {signal}".format(**locals()))
-            if signal == 'session-data' and data:
-                sessions.append(child.get_session(data))
-
-        with pathlib.Path(filename) as sessions_file:
-            json_str = json_dumps({
-                'sessions': sessions,
-                'last-tab': self._last_tab,
-                }, indent=4)
-            sessions_file.write_text(json_str)
+        self._profile['search'] = self._search_settings.get_all()
+        self._profile['default-search'] = self._search_settings.get_default_name()
+        self._profile['user-agents'] = self._agent_settings.get_all()
+        self._profile['default-user-agent'] = self._agent_settings.get_default_name()
+        self._profile.save_config()
 
     def _restore_session_cb(self, session_manager: object, session: dict):
         """ Restore session.
@@ -467,14 +441,6 @@ class MainWindow(object):
 
         self._main_popover.hide()
         self._restore_session(session)
-
-    def _restore_session_list(self, session_list: list):
-        """ Restore a list of sessions.
-
-        """
-
-        for session in sorted(session_list, key=lambda i: i['index']):
-            self._restore_session(session)
 
     def _restore_session(self, session: dict):
         """ Restore the sessons in sessions.
@@ -493,21 +459,20 @@ class MainWindow(object):
         else:
             # This is the first session from this pid to be restored, so
             # start a new process for it.
-            com_dict, child = self._make_tab(private=private,
-                                             focus=session['focus'])
-            new_pid = self._new_proc(com_dict)
-            self._pid_map[pid] = new_pid
-            child.pid = new_pid
+            init_dict, child = self._make_tab(private=private,
+                                              focus=session['focus'])
+            self._pid_map[pid] = self._new_proc(init_dict, child)
             child.set_state(session['state'])
+            child.order = session.get('order', 0)
             self._tabs.reorder_child(child.tab_grid, session['index'])
         child.send('restore-session', session)
 
-    def _get_session(self, child: dict, session_data: object):
-        """ Build a dictionary of all session data for child and return it.
+    def _update_session(self, child: dict, session_data: bytes) -> dict:
+        """ Return a dictionary of session information for child.
 
         """
 
-        session_dict = {
+        child.session_dict = {
                 'session-data': session_data,
                 'index': self._tabs.page_num(child.tab_grid),
                 'state': child.state,
@@ -516,9 +481,10 @@ class MainWindow(object):
                 'focus': child.focus,
                 'title': child.title,
                 'uri': child.uri,
+                'order': child.order,
                 }
 
-        return session_dict
+        return child.session_dict
 
     def _callback(self, source: int, cb_condition: int, window: dict):
         """ Handle each window.
@@ -530,58 +496,51 @@ class MainWindow(object):
         debug_list = ['mouse-motion', 'back-forward-list', 'can-go-back',
                       'can-go-forward', 'is-secure', 'icon-bytes',
                       'estimated-load-progress', 'hover-link',
-                      'session-data']
+                      'session-data', 'closed']
         if signal in debug_list:
             logging.debug("_CALLBACK: {signal} => {data}".format(**locals()))
         else:
             logging.info("_CALLBACK: {signal} => {data}".format(**locals()))
 
-        if signal == 'closed' or signal == 'terminate' and data:
-            socket_id = data['socket-id']
-            pid = data['pid']
+        if signal == 'closed':
+            session = data['session']
+            if session['session-data']:
+                # Store the closed session in the session manager, so it
+                # can be re-opened.
+                window.session_dict.update(session)
+                self._session_manager.add_session(window.session_dict)
 
-            self._closed[pid] = self._windows.pop(socket_id).com_dict
-
-            if signal == 'terminate':
-                try:
-                    while window.com_pipe.poll(): sig, _ = window.recv()
-                except ConnectionResetError as err:
-                    logging.error(err)
-                self._closed.pop(pid, None)
-                logging.info('Sending terminate for: {pid}'.format(**locals()))
-                self._send('terminate', pid)
-
-            logging.info('CLOSED DICT: {self._closed}'.format(**locals()))
+            if data['is-last']:
+                logging.info('Sending terminate for: {pid}'.format(**window))
+                self._send('terminate', window.pid)
 
             self._tabs.remove_page(self._tabs.page_num(window.tab_grid))
 
             window.com_pipe.close()
-
+            self._windows.pop(window.socket_id).clear()
+            logging.info('CLEAR')
             return False
 
         if signal == 'mouse-motion':
-            window.address_bar.set_visible(self._fixed_address_bar)
-
-        if signal == 'pid':
-            window.pid = data
-            if window.uri != 'about:blank': window.send('open-uri', window.uri)
-            self._update_title(window)
+            window.address_bar.set_visible(not self._profile.hide_address_bar)
 
         if signal == 'tab-info':
             logging.info('TAB_INFO: {data}'.format(data=data))
             socket_id, child = self._add_tab(data['com-pipe'],
-                                             data['com-dict'], data['focus'],
-                                             uri=data['uri'])
+                                             data['child-pipe'], data['focus'],
+                                             uri=data['uri'],
+                                             index=data['index'],
+                                             private=data['private'])
             child.update(data)
             self._windows[socket_id] = child
             child.send('socket-id', socket_id)
             self._update_title(child)
 
         if signal == 'create-tab':
-            pid = self._new_proc(self._make_tab(**data)[0])
+            pid = self._new_proc(*self._make_tab(**data))
 
         if signal == 'title':
-            window['title'] = data if data else 'about:blank'
+            window.title = data if data else window.uri
             self._update_title(window)
 
         if signal == 'icon-bytes':
@@ -666,32 +625,28 @@ class MainWindow(object):
         if signal == 'find-failed':
             window['find-entry'].set_name('not-found' if data else '')
 
-        if signal == 'private':
-            window.private = data
-            self._update_title(window)
-
         if signal == 'back-forward-list':
             back_list, current_dict, forward_list = data
             window.back_list = back_list
             window.current = current_dict
             window.forward_list = forward_list
 
-            # Save the sessions so they can be restored if the browser
-            # crashes.
-            # self._save_sessions(self._config.sessions_file)
+            # Save sessions to restore if the window crashes.
+            session_list = [i.session_dict for i in self._windows.values()]
+            self._session_manager.save_sessions(session_list, True)
 
         if signal == 'is-loading':
             window.is_loading = data
 
-        if signal == 'session-data':
-            logging.info("Recieved Session Data")
-            if data:
-                session_dict = window.get_session(data)
-                self._session_manager.add_session(session_dict)
+        if signal == 'crashed':
+            if not self._is_closing: window.update_session(data)
 
         if signal == 'download':
             self._download_manager.new_download(data['uri'],
                                                 start=data.get('start', True))
+
+        if signal == 'session-data':
+            if not self._is_closing: window.update_session(data)
 
         return True
 
@@ -704,7 +659,7 @@ class MainWindow(object):
         logging.info('RECIEVE: {signal} => {data}'.format(**locals()))
 
         if signal == 'add-tab':
-            pid = self._new_proc(self._make_tab(**data)[0])
+            pid = self._new_proc(*self._make_tab(**data))
 
         return True
 
@@ -713,11 +668,10 @@ class MainWindow(object):
 
         """
 
-        child.private_str = 'Private' if child.private else ''
         child.title_str = '{title} (pid: {pid}) {private_str}'.format(**child)
         child.label.set_text(child.title_str)
         child.event_box.set_tooltip_text(child.title_str)
-        if child == self._get_current_child():
+        if child == self._get_child_dict():
             self._window.set_title('{child.title-str} - {self._name}'.format(**locals()))
 
         self._tabs.set_menu_label_text(child.tab_grid, child.title_str)
@@ -740,14 +694,14 @@ class MainWindow(object):
             except Exception as err:
                 logging.error(err)
 
-    def _add_tab(self, com_pipe: object, com_dict: object,
+    def _add_tab(self, com_pipe: object, child_pipe: object,
                  focus: bool = False, uri: str = 'about:blank',
-                 index: int = -1, **kwargs):
+                 index: int = -1, private: bool = True):
         """ Add Tab.
 
         """
 
-        child = ChildDict(kwargs)
+        child = ChildDict()
 
         find_entry = Gtk.Entry()
 
@@ -845,6 +799,8 @@ class MainWindow(object):
         address_bar.add(address_item)
 
         label = Gtk.Label('about:blank')
+        label.set_xalign(0)
+        label.set_hexpand(True)
         label.set_margin_top(7)
         label.set_margin_bottom(5)
         label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -886,6 +842,7 @@ class MainWindow(object):
                                   Gtk.PositionType.RIGHT, 1, 1)
 
         eventbox= Gtk.EventBox()
+        eventbox.set_hexpand(False)
         eventbox.add_events(Gdk.EventMask.SCROLL_MASK)
         eventbox.add(label_grid)
         eventbox.show_all()
@@ -898,18 +855,19 @@ class MainWindow(object):
         overlay.set_hexpand(True)
         overlay.set_vexpand(True)
         overlay.add_overlay(socket)
-        if not self._fixed_address_bar:
+        if self._profile.hide_address_bar:
             overlay.add_overlay(address_bar)
 
         tab_grid = Gtk.Grid()
-        if self._fixed_address_bar:
+        if not self._profile.hide_address_bar:
             tab_grid.attach(address_bar, 0, 0, 1, 1)
         tab_grid.attach(overlay, 0, 1, 1, 1)
         tab_grid.show_all()
-        tab_grid.attach_next_to(find_bar, overlay, Gtk.PositionType.BOTTOM, 1, 1)
+        tab_grid.attach_next_to(find_bar, overlay, Gtk.PositionType.BOTTOM, 1,
+                                1)
 
-        insert_at = index if focus else self._tabs.get_current_page() + 1
-        index = self._tabs.insert_page(tab_grid, eventbox, insert_at)
+        i = index if focus or index > -1 else self._tabs.get_current_page() + 1
+        index = self._tabs.insert_page(tab_grid, eventbox, i)
         self._tabs.set_tab_reorderable(tab_grid, True)
 
         socket_id = socket.get_id()
@@ -917,7 +875,7 @@ class MainWindow(object):
         child.update({
             'close': lambda: self._close_child(child),
             'com-pipe': com_pipe,
-            'com-dict': com_dict,
+            'child-pipe': child_pipe,
             'send': lambda signal, data: com_pipe.send((signal, data)),
             'recv': com_pipe.recv,
             'is-loading': False,
@@ -926,9 +884,9 @@ class MainWindow(object):
             'title': uri,
             'index': index,
             'focus': focus,
-            'private': True,
-            'private-str': 'Private',
-            'title-str': '{title} (pid: 0) Private'.format(**child),
+            'private': private,
+            'private-str': 'Private' if private else '',
+            'title-str': '{title} (pid: {pid}) {private-str}'.format(**child),
             'cert-data': (False, False, {}, 0),
             'back-list': [],
             'current-dict': {},
@@ -945,6 +903,7 @@ class MainWindow(object):
             'socket': socket,
             'event_box': eventbox,
             'tab_grid': tab_grid,
+            'overlay': overlay,
             'close-button': tab_close_btn,
             'label_grid': label_grid,
             'socket-id': socket_id,
@@ -957,38 +916,51 @@ class MainWindow(object):
             'normal-width': 150 + 16 + 16,
             'state': {'minimized': False, 'hidden': False},
             'set-state': lambda state: self._set_state(child, state),
-            'get-session': lambda data: self._get_session(child, data),
+            'update-session': lambda data: self._update_session(child, data),
+            'session-dict': {},
+            'sig-ids': [],
+            'order': 0,
             })
 
         eventbox.set_size_request(child.normal_width, -1)
 
         self._windows[socket_id] = child
 
-        find_close.connect('clicked', lambda btn: find_bar.hide())
-        back_button.connect('button-release-event', self._back_released, child)
-        back_button.connect('button-press-event', lambda btn, evnt: evnt.button == 3)
-        forward_button.connect('button-release-event', self._forward_released,
-                               child)
-        forward_button.connect('button-press-event', lambda btn, evnt: evnt.button == 3)
-        child['plug-removed'] = socket.connect('plug-removed',
-                                               self._plug_removed, child)
-        socket.connect('plug-added', self._plug_added, child)
-        eventbox.connect('button-press-event', self._tab_button_press, child)
-        eventbox.connect('button-release-event', self._tab_button_release,
-                         child)
-        address_entry.connect('activate',
-                              lambda e: child.send('open-uri', e.get_text()))
-        address_entry.connect('icon-release', self._address_entry_icon_release,
-                              child)
-        address_entry.connect('changed', self._address_entry_changed, child)
-        find_entry.connect('activate', self._find, child)
-        find_entry.connect('changed', self._find, child)
-        find_next.connect('button-release-event', self._find_next_button,
-                          child)
-        find_prev.connect('button-release-event', self._find_prev_button,
-                          child)
-        tab_close_btn.connect('button-release-event', self._tab_button_release,
-                              child)
+        signal_handlers = (
+                (find_close, 'clicked', lambda btn: find_bar.hide()),
+                (back_button, 'button-release-event', self._back_released,
+                    child),
+                (back_button, 'button-press-event',
+                    lambda btn, evnt: evnt.button == 3),
+                (forward_button, 'button-release-event',
+                    self._forward_released, child),
+                (forward_button, 'button-press-event',
+                    lambda btn, evnt: evnt.button == 3),
+                (socket, 'plug-removed', self._plug_removed, child),
+                (socket, 'plug-added', self._plug_added, child),
+                (eventbox, 'button-press-event', self._tab_button_press,
+                    child),
+                (eventbox, 'button-release-event', self._tab_button_release,
+                    child),
+                (address_entry, 'activate',
+                    lambda e: child.send('open-uri', e.get_text())),
+                (address_entry, 'icon-release',
+                    self._address_entry_icon_release, child),
+                (address_entry, 'changed', self._address_entry_changed, child),
+                (address_entry, 'populate-popup', self._address_populate_popup,
+                    child),
+                (find_entry, 'activate', self._find, child),
+                (find_entry, 'changed', self._find, child),
+                (find_next, 'button-release-event', self._find_next_button,
+                    child),
+                (find_prev, 'button-release-event', self._find_prev_button,
+                    child),
+                (tab_close_btn, 'button-release-event',
+                    self._tab_button_release, child),
+                )
+
+        for widget, event, func, *args in signal_handlers:
+            child.sig_ids.append((widget, widget.connect(event, func, *args)))
 
         child['event-source-id'] = GLib.io_add_watch(com_pipe.fileno(),
                                                      GLib.IO_IN,
@@ -1016,7 +988,7 @@ class MainWindow(object):
 
         """
 
-        child = self._get_current_child()
+        child = self._get_child_dict()
         if 'hover-uri' in child:
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(child.hover_uri, -1)
@@ -1026,8 +998,8 @@ class MainWindow(object):
 
         """
 
-        if not self._fixed_address_bar:
-            child = self._get_current_child()
+        if self._profile.hide_address_bar:
+            child = self._get_child_dict()
             child.address_bar.show_all()
             child.address_entry.grab_focus()
 
@@ -1036,14 +1008,14 @@ class MainWindow(object):
 
         """
 
-        child = self._get_current_child()
+        child = self._get_child_dict()
         if child.address_entry.has_focus():
             uri_str = '' if child.uri == 'about:blank' else child.uri
             child.address_entry.set_text(uri_str)
             icon = self._stop_icon if child.is_loading else self._refresh_icon
             child.address_entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
                                                     icon)
-            if not self._fixed_address_bar:
+            if self._profile.hide_address_bar:
                 child.address_bar.hide()
         elif child.find_entry.has_focus():
             self._findbar_toggle()
@@ -1075,12 +1047,28 @@ class MainWindow(object):
         child.address_entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
                                                   tooltip_text)
 
+    def _address_populate_popup(self, entry: object, popup: object,
+                                child: dict):
+        """ Add items to the popup.
+
+        """
+
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        text = clipboard.wait_for_text()
+        if text:
+            popup.prepend(Gtk.SeparatorMenuItem())
+            item = Gtk.MenuItem('Paste and Go')
+            item.connect('activate', lambda *a: child.send('open-uri', text))
+            item.show_all()
+            popup.prepend(item)
+
+
     def _findbar_toggle(self, *args):
         """ Toggle findbar visibility.
 
         """
 
-        child = self._get_current_child()
+        child = self._get_child_dict()
         find_bar = child['find-bar']
         find_entry = child['find-entry']
 
@@ -1091,7 +1079,8 @@ class MainWindow(object):
             else:
                 find_entry.grab_focus()
         else:
-            if self._find_str: find_entry.set_text(self._find_str)
+            if self._profile.find_str:
+                find_entry.set_text(self._profile.find_str)
             find_bar.show_all()
             find_entry.grab_focus()
 
@@ -1100,8 +1089,7 @@ class MainWindow(object):
 
         """
 
-        self._find_str = entry.get_text()
-        self._config['find-str'] = self._find_str
+        self._profile.find_str = entry.get_text()
         child.send('find', entry.get_text())
 
     def _find_next_key(self, accels: object, window: object, keyval: object,
@@ -1110,12 +1098,12 @@ class MainWindow(object):
 
         """
 
-        child = self._get_current_child()
+        child = self._get_child_dict()
         find_bar = child['find-bar']
         find_entry = child['find-entry']
 
-        if self._find_str and not find_entry.get_text():
-            find_entry.set_text(self._find_str)
+        if self._profile.find_str and not find_entry.get_text():
+            find_entry.set_text(self._profile.find_str)
 
         if not find_bar.is_visible():
             find_bar.show_all()
@@ -1168,7 +1156,7 @@ class MainWindow(object):
 
         """
 
-        if not child: child = self._get_current_child()
+        if not child: child = self._get_child_dict()
         child.label.set_visible(not child.label.get_visible())
         child.state['minimized'] = not child.label.get_visible()
         if child.label.is_visible():
@@ -1181,7 +1169,7 @@ class MainWindow(object):
 
         """
 
-        if not child: child = self._get_current_child()
+        if not child: child = self._get_child_dict()
         child.label_grid.set_visible(not child.label_grid.get_visible())
         child.state['hidden'] = not child.label_grid.get_visible()
         if child.label_grid.is_visible():
@@ -1303,13 +1291,14 @@ class MainWindow(object):
 
         """
 
-        if not child: child = self._get_current_child()
+        if not child: child = self._get_child_dict()
 
         if not flags & Gdk.ModifierType.SHIFT_MASK:
             if flags & Gdk.ModifierType.MOD1_MASK:
                 settings['private'] = False
-            pid = self._new_proc(self._make_tab(**settings)[0])
+            pid = self._new_proc(*self._make_tab(**settings))
         else:
+            settings['index'] = self._tabs.get_current_page() + 1
             child.send('new-tab', settings)
 
     @button_release
@@ -1334,14 +1323,14 @@ class MainWindow(object):
         else:
             self._tabs.prev_page()
 
-    def _tab_reordered(self, notebook: object, child: object, index: int):
+    def _tab_reordered(self, notebook: object, tab_grid: object, index: int):
         """ Set the new ordering.
 
         """
 
-        logging.info('{child} {index}'.format(**locals()))
+        logging.info('{tab_grid} {index}'.format(**locals()))
 
-    def _tab_switched(self, notebook: object, child: object, index: int):
+    def _tab_switched(self, notebook: object, tab_grid: object, index: int):
         """ Do stuff when the tab is switched.
 
         """
@@ -1349,16 +1338,17 @@ class MainWindow(object):
         # Do nothing if there are no more tabs.
         if not self._windows: return True
 
-
+        prev_child = self._get_child_dict()
         # Set the previous tabs focus to false.
-        self._get_current_child().focus = False
+        prev_child.focus = False
 
-        child_dict = self._get_current_child(child)
+        child_dict = self._get_child_dict(tab_grid)
+        child_dict.focus = True
         self._window.set_title('{title-str} - {name}'.format(**child_dict,
                                                              name=self._name))
-        child_dict.focus = True
-
-        self._last_tab.append(self._tabs.page_num(child))
+        # Set the order to one greater than the last tab, so when this
+        # tab is closed the last one will be selected.
+        if child_dict != prev_child: child_dict.order = prev_child.order + 1
 
         if not child_dict.address_entry.get_text():
             child_dict.address_bar.show_all()
@@ -1377,20 +1367,21 @@ class MainWindow(object):
             logging.info("NO MORE PAGES, EXITING")
             self._window.emit('delete-event', None)
 
-    def _to_last_tab(self, old_index: int):
+    def _to_last_tab(self, child: object):
         """ Switch to the correct tab before closing.
 
         """
 
-        try:
-            # Remove all instances of old_index from the last tab list.
-            self._last_tab = [i for i in self._last_tab if i != old_index]
+        # Sort the tabs by the order they were last active.
+        tmp_list = sorted(self._windows.values(), key=lambda i: i.order)
 
-            # Switch to the last tab.
-            if self._last_tab:
-                self._tabs.set_current_page(self._last_tab.pop(-1))
-        except:
-            pass
+        # Get the last active tab.
+        while tmp_list:
+            last = tmp_list.pop(-1)
+            if last != child: break
+
+        # Switch to the last active tab.
+        self._tabs.set_current_page(self._tabs.page_num(last.tab_grid))
 
     def _tab_button_press(self, eventbox: object, event: object, child: dict):
         """ Close the tab.
@@ -1410,17 +1401,17 @@ class MainWindow(object):
         if event.button == 2 or (event.button == 1 and \
                 event.state & Gdk.ModifierType.CONTROL_MASK) or \
                 widget == child.close_button:
-            return self._button_close_tab(event, child)
+            return self._close_tab(event.state, child)
 
-    def _button_close_tab(self, event: object, child: dict):
+    def _close_tab(self, flags: object, child: dict):
         """ Close child's tab.
 
         """
 
         if self._tabs.get_nth_page(self._tabs.get_current_page()) == child['tab_grid']:
-            self._to_last_tab(self._tabs.page_num(child.tab_grid))
-        if event.state & Gdk.ModifierType.MOD1_MASK:
-            for _, tab in self._windows.items():
+            self._to_last_tab(child)
+        if flags & Gdk.ModifierType.MOD1_MASK:
+            for tab in self._windows.values():
                 if tab['pid'] == child['pid']:
                     self._tabs.remove_page(self._tabs.page_num(tab['tab_grid']))
             logging.info("sending Terminate")
@@ -1431,8 +1422,9 @@ class MainWindow(object):
 
         return True
 
-    def _get_current_child(self, tab_grid: object = None):
-        """ Returns the child dict of the current tab.
+    def _get_child_dict(self, tab_grid: object = None):
+        """ Returns the child dict of the current tab if tab_grid is None,
+        otherwise the child_dict containing tab_grid.
 
         """
 
@@ -1460,18 +1452,18 @@ class MainWindow(object):
         settings = {'focus': True, 'uri': 'about:blank'}
         self._open_new_tab(flags, settings=settings)
 
-    def _close_tab(self, accels: object, window: object, keyval: object,
+    def _close_tab_key(self, accels: object, window: object, keyval: object,
                    flags: object):
         """ Close tab.
 
         """
 
         logging.info('Close tab')
-        child = self._get_current_child()
-        self._to_last_tab(self._tabs.page_num(child.tab_grid))
-        child.close()
+        child = self._get_child_dict()
+        self._close_tab(flags, child)
 
-    def _switch_tab(self, accels: object, window: object, keyval: object, flags: object):
+    def _switch_tab_key(self, accels: object, window: object, keyval: object,
+                        flags: object):
         """ Switch tab.
 
         """
@@ -1480,16 +1472,17 @@ class MainWindow(object):
         if self._tabs.get_n_pages() > (keyval - 49):
             self._tabs.set_current_page(keyval - 49)
 
-    def _focus_address_entry(self, accels: object, window: object,
-                             keyval: object, flags: object):
+    def _focus_address_entry_key(self, accels: object, window: object,
+                                 keyval: object, flags: object):
         """ Focus the address bar entry.
 
         """
 
-        self._get_current_child().address_bar.show_all()
-        self._get_current_child().address_entry.grab_focus()
+        child = self._get_child_dict()
+        child.address_bar.show_all()
+        child.address_entry.grab_focus()
 
-    def _new_proc(self, settings: dict) -> int:
+    def _new_proc(self, settings: dict, child: dict) -> int:
         """ Start a new process using settings and returns the pid.
 
         """
@@ -1497,6 +1490,9 @@ class MainWindow(object):
         self._send('new-proc', settings)
         signal, data = self._recv()
         if signal != 'proc-pid': return 0
+        child.pid = data
+        self._update_title(child)
+
         return data
 
     def _plug_removed(self, socket: object, child: dict):
@@ -1505,13 +1501,14 @@ class MainWindow(object):
         """
 
         logging.info("PLUG REMOVED: {child.uri}".format(**locals()))
-        logging.info("PLUG REMOVED CHILD: {child}".format(**locals()))
         self._send('terminate', child['pid'])
+        self._restore_session(child.session_dict)
 
-        if not child['pid'] in self._revived:
-            self._revived.append(child['pid'])
-            logging.info('COMDICT: {child.com_dict}'.format(**locals()))
-            child['pid'] = self._new_proc(child.com_dict)
+        child.com_pipe.close()
+        child.child_pipe.close()
+        self._tabs.remove_page(self._tabs.page_num(child.tab_grid))
+
+        self._windows.pop(child.socket_id).clear()
 
         return True
 
@@ -1521,18 +1518,18 @@ class MainWindow(object):
         """
 
         logging.info('PLUG ADDED to {child.tab_grid}'.format(**locals()))
-        child.tab_grid.show_all()
-        child.find_bar.hide()
-        if child.focus:
-            self._tabs.set_current_page(child.index)
-            child.address_entry.grab_focus()
+        # child.tab_grid.show_all()
+        # child.find_bar.hide()
+        # if child.focus:
+        #     self._tabs.set_current_page(child.index)
+        #     child.address_entry.grab_focus()
 
     def _bookmark_release(self, menu: object, event: object, uri: str):
         """ Open the bookmark.
 
         """
 
-        child = self._get_current_child()
+        child = self._get_child_dict()
 
         if event.button == 2 or (event.button == 1 and \
                 event.state & Gdk.ModifierType.CONTROL_MASK):
@@ -1551,14 +1548,14 @@ class MainWindow(object):
         """
 
         for uri in uri_list:
-            pid = self._new_proc(self._make_tab(uri=uri, focus=True)[0])
+            pid = self._new_proc(*self._make_tab(uri=uri, focus=True))
 
     def _bookmark_new(self, menu: object):
         """ Return the current tab.
 
         """
 
-        child = self._get_current_child()
+        child = self._get_child_dict()
         return child.uri, child.title
 
     def _bookmark_tab_list(self, menu: object):
@@ -1583,6 +1580,6 @@ class MainWindow(object):
 
         if signal == 'new-tab':
             for uri in data:
-                pid = self._new_proc(self._make_tab(uri=uri)[0])
+                pid = self._new_proc(*self._make_tab(uri=uri))
 
         return True
