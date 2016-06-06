@@ -24,6 +24,7 @@
 """
 
 import os
+import re
 import sys
 import tempfile
 import subprocess
@@ -75,6 +76,18 @@ class BrowserProc(object):
         self._search_url = com_dict.pop('search-url', self._fallback_search)
         self._web_view_settings['user-agent'] = com_dict.get('user-agent', '')
 
+        self._adblock_filters = {}
+        adblock_filters = com_dict.get('adblock-filters', {})
+        for name, (regex, active) in adblock_filters.items():
+            if active:
+                self._adblock_filters[name] = regex #re.compile(regex)
+
+        self._media_filters = {}
+        media_filters = com_dict.get('media-filters', {})
+        for name, (regex, active) in media_filters.items():
+            if active:
+                self._media_filters[name] = re.compile(regex)
+
         self._pid = current_process().pid
 
         self._windows = []
@@ -104,7 +117,11 @@ class BrowserProc(object):
 
         settings = webview.get_settings()
         for prop, value in self._web_view_settings.items():
-            settings.set_property(prop, value)
+            logging.info("setting: {prop} => {value}".format(**locals()))
+            try:
+                settings.set_property(prop, value)
+            except TypeError as err:
+                logging.error(err)
 
         if self._private:
             ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
@@ -329,21 +346,18 @@ class BrowserProc(object):
 
         """
 
-        logging.info('Destroying: {view_dict.socket_id}'.format(**locals()))
-
         self._windows.remove(view_dict)
 
         if not self._windows:
             # Close all temporary files.
             for f in self._tmp_files: f.close()
 
-            logging.info("Destroying: {self._pid}".format(**locals()))
+            logging.info("DESTROYING: {self._pid}".format(**locals()))
             Gtk.main_quit()
-            logging.info('{self._pid} CLOSED'.format(**locals()))
 
         send_dict = {
                 'session': view_dict.session,
-                'is-last': len(self._windows) == 0,
+                'is-last': not bool(self._windows),
                 }
         try:
             view_dict.send('closed', send_dict)
@@ -430,11 +444,28 @@ class BrowserProc(object):
 
         if signal == 'web-view-settings':
             settings = view_dict.webview.get_settings()
-            settings.set_property(*data)
+            try:
+                settings.set_property(*data)
+            except TypeError as err:
+                logging.error(err)
 
         if signal == 'default-search':
             self._search_url = data
             view_dict.search_url = data
+
+        if signal == 'adblock':
+            name, regex, active = data
+            if active:
+                self._adblock_filters[name] = regex #re.compile(regex)
+            else:
+                self._adblock_filters.pop(name, None)
+
+        if signal == 'media-filter':
+            name, regex, active = data
+            if active:
+                self._media_filters[name] = re.compile(regex)
+            else:
+                self._media_filters.pop(name, None)
 
         return True
 
@@ -514,9 +545,19 @@ class BrowserProc(object):
                 menu.append(WebKit2.ContextMenuItem.new_separator())
                 menu.append(menu_item)
 
-        # Allow viewing the source of any webpage except a blank or
-        # about:blank page.
         if webview.get_uri() and webview.get_uri() != 'about:blank':
+            action = Gtk.Action('print-page', 'Print Page', 'Print Page',
+                                '')
+            icon = Gio.ThemedIcon.new_with_default_fallbacks('printer-symbolic')
+            action.set_gicon(icon)
+            action.connect('activate', self._context_activate, '', view_dict)
+            menu_item = WebKit2.ContextMenuItem.new(action)
+            menu.append(WebKit2.ContextMenuItem.new_separator())
+            menu.append(menu_item)
+            menu.append(WebKit2.ContextMenuItem.new_separator())
+
+            # Allow viewing the source of any webpage except a blank or
+            # about:blank page.
             action = Gtk.Action('view-source', 'View Source', 'View Source',
                                 '')
             icon = Gio.ThemedIcon.new_with_default_fallbacks('text-editor-symbolic')
@@ -605,10 +646,15 @@ class BrowserProc(object):
         view_dict.send('download', info_dict)
 
     def _context_activate(self, action: object, selected_text: str,
-                        view_dict: dict, flags: object = None):
+                          view_dict: dict, flags: object = None):
         """ Handle custom context menu actions.
 
         """
+
+        if action.get_name() == 'print-page':
+            print_op = WebKit2.PrintOperation.new(view_dict.webview)
+            print_op.run_dialog(view_dict.plug)
+            return True
 
         if action.get_name() == 'view-source':
             res = view_dict.webview.get_main_resource()
@@ -672,21 +718,22 @@ class BrowserProc(object):
 
         uri = request.get_uri()
 
-        if '.mp3?' in uri:
-            http_headers = request.get_http_headers()
-            mimetype = http_headers.get_content_type()
-            length = http_headers.get_content_length()
-            user_agent = webview.get_settings().get_property('user-agent')
-            filename = uri.split('/')[-1]
-            info_dict = {
-                    'uri': uri,
-                    'filename': filename,
-                    'mime-type': mimetype,
-                    'length': length,
-                    'user-agent': user_agent,
-                    'start': False,
-                    }
-            view_dict.send('download', info_dict)
+        for _, regex in self._media_filters.items():
+            if regex.search(uri):
+                http_headers = request.get_http_headers()
+                mimetype = http_headers.get_content_type()
+                length = http_headers.get_content_length()
+                user_agent = webview.get_settings().get_property('user-agent')
+                filename = uri.split('/')[-1]
+                info_dict = {
+                        'uri': uri,
+                        'filename': filename,
+                        'mime-type': mimetype,
+                        'length': length,
+                        'user-agent': user_agent,
+                        'start': False,
+                        }
+                view_dict.send('download', info_dict)
 
         logging.debug("RESOURCE {uri}".format(**locals()))
         if webview.get_uri().startswith('https') and uri.startswith('http:'):
@@ -707,11 +754,12 @@ class BrowserProc(object):
 
         """
 
-        if 'ads' in uri.lower() and 'kissanime' in uri.lower():
-            return True
-        if 'doubleclick.net' in uri.lower() or 'pubads.' in uri.lower() or \
-                '/ads/' in uri.lower():
-            return True
+        for _, regex in self._adblock_filters.items():
+            # if regex.search(uri):
+            logging.info('{regex} in {uri}'.format(**locals()))
+            if re.search(regex, uri):
+                logging.info('AdBlock Blocking: {uri}'.format(**locals()))
+                return True
 
     def _policy(self, webview: object, decision: object, decision_type: object,
                 view_dict: dict):
@@ -775,6 +823,11 @@ class BrowserProc(object):
             http_headers = response.get_http_headers()
             uri = response.get_uri()
             logging.debug('RESPONSE {uri}'.format(**locals()))
+
+            if self._is_add_match(uri):
+                logging.info('Blocking: {uri}'.format(**locals()))
+                decision.ignore()
+                return True
 
             if not decision.is_mime_type_supported():
                 filename = response.get_suggested_filename()

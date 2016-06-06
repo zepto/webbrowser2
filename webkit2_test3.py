@@ -236,6 +236,7 @@ class BrowserProc(object):
         # Firefox user agent string.
         # settings.set_property('user-agent', 'Mozilla/5.0 (X11; Linux x86_64; \
         #                        rv:45.0) Gecko/20100101 Firefox/45.0')
+        settings.set_property('enable-private-browsing', True)
 
         return webview
 

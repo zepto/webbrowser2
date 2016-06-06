@@ -42,7 +42,7 @@ from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GdkPixbuf
 from functions import looks_like_uri, get_config_path, save_dialog
 from classes import ChildDict, Profile, SettingsPopover, SearchSettings
 from classes import SettingsManager, SessionManager, DownloadManager
-from classes import AgentSettings
+from classes import AgentSettings, AdBlockSettings, MediaFilterSettings
 from bookmarks import BookmarkMenu
 
 
@@ -178,9 +178,19 @@ class MainWindow(object):
         self._search_settings.connect('added', lambda *a: self._save_config())
         self._search_settings.connect('removed', lambda *a: self._save_config())
 
+        self._adblock_settings = AdBlockSettings(self._profile.adblock,
+                                                 self._window)
+        self._adblock_settings.connect('set-active', self._adblock_set_active)
+
+        self._media_filter_settings = MediaFilterSettings(self._profile.media_filters,
+                                                      self._window)
+        self._media_filter_settings.connect('set-active', self._media_filter_set_active)
+
         self._settings_manager = SettingsManager(self._profile)
         self._settings_manager.add_custom_setting(self._agent_settings)
         self._settings_manager.add_custom_setting(self._search_settings)
+        self._settings_manager.add_custom_setting(self._adblock_settings)
+        self._settings_manager.add_custom_setting(self._media_filter_settings)
         self._settings_manager.show_clear_buttons(True)
         self._settings_manager.connect('setting-changed',
                                        self._settings_changed)
@@ -267,6 +277,8 @@ class MainWindow(object):
                 'web-view-settings': self._profile.web_view_settings,
                 'search-url': self._search_settings.get_default(),
                 'user-agent': self._agent_settings.get_default(),
+                'adblock-filters': self._profile.adblock,
+                'media-filters': self._profile.media_filters,
                 'com-pipe': child_pipe,
                 'socket-id': socket_id,
                 }
@@ -322,6 +334,24 @@ class MainWindow(object):
         """
 
         self._send_all('default-search', uri)
+
+    @save_config
+    def _adblock_set_active(self, adblock_settings: object, name: str,
+                            data: str, active: bool):
+        """ Set the default search engine.
+
+        """
+
+        self._send_all('adblock', (name, data, active))
+
+    @save_config
+    def _media_filter_set_active(self, adblock_settings: object, name: str,
+                            data: str, active: bool):
+        """ Set the default search engine.
+
+        """
+
+        self._send_all('media-filter', (name, data, active))
 
     @save_config
     def _size_allocate(self, window: object, allocation: object):
@@ -467,7 +497,7 @@ class MainWindow(object):
             self._tabs.reorder_child(child.tab_grid, session['index'])
         child.send('restore-session', session)
 
-    def _update_session(self, child: dict, session_data: bytes) -> dict:
+    def _update_session(self, child: dict, session_data: bytes = {}) -> dict:
         """ Return a dictionary of session information for child.
 
         """
@@ -674,7 +704,10 @@ class MainWindow(object):
         if child == self._get_child_dict():
             self._window.set_title('{child.title-str} - {self._name}'.format(**locals()))
 
-        self._tabs.set_menu_label_text(child.tab_grid, child.title_str)
+        label = Gtk.Label(child.title_str)
+        label.set_max_width_chars(48)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._tabs.set_menu_label(child.tab_grid, label)
 
     def _send(self, signal: str, data: object):
         """ Send signal and data using the main pipe.
@@ -809,6 +842,7 @@ class MainWindow(object):
         btn_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         tab_close_btn = Gtk.Button()
+        tab_close_btn.set_halign(Gtk.Align.END)
         tab_close_btn.set_image(btn_img)
         tab_close_btn.set_relief(Gtk.ReliefStyle.NONE)
         tab_close_btn.set_margin_end(6)

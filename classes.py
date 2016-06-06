@@ -130,6 +130,35 @@ class Profile(dict):
                         'enable-webgl': True,
                         'enable-accelerated-2d-canvas': True,
                         'enable-developer-extras': True,
+                        'allow-file-access-from-file-urls': False,
+                        'allow-modal-dialogs': False,
+                        'auto-load-images': True,
+                        'draw-compositing-indicators': False,
+                        'enable-caret-browsing': False,
+                        'enable-frame-flattening': False,
+                        'enable-fullscreen': True,
+                        'enable-resizable-text-areas': True,
+                        'enable-site-specific-quirks': True,
+                        'enable-smooth-scrolling': False,
+                        'enable-spatial-navigation': False,
+                        'enable-tabs-to-links': True,
+                        'enable-write-console-messages-to-stdout': False,
+                        'enable-xss-auditor': True,
+                        'javascript-can-access-clipboard': False,
+                        'javascript-can-open-windows-automatically': False,
+                        'media-playback-requires-user-gesture': False,
+                        'print-backgrounds': True,
+                        'zoom-text-only': False,
+                        }
+            elif key == 'adblock':
+                self[key] = {
+                        '/ads/': ('\/ads\/', True),
+                        'doubleclick': ('doubleclick\.net', True),
+                        'pubads': ('pubads\.', True),
+                        }
+            elif key == 'media-filters':
+                self[key] = {
+                        'soundcloud mp3s': ('\.mp3\?', True),
                         }
             elif key == 'search':
                 self[key] = {
@@ -277,6 +306,7 @@ class DownloadManager(Gtk.Grid):
         empty_label.set_hexpand(True)
 
         self._download_list = Gtk.ListBox()
+        self._download_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._download_list.set_vexpand(True)
         self._download_list.set_hexpand(True)
 
@@ -320,6 +350,7 @@ class DownloadManager(Gtk.Grid):
         progress_bar = Gtk.ProgressBar()
         progress_bar.set_margin_start(3)
         progress_bar.set_margin_end(12)
+        progress_bar.set_halign(Gtk.Align.START)
         progress_bar.set_hexpand(True)
         progress_bar.set_show_text(True)
         progress_bar.set_text(uri)
@@ -520,9 +551,14 @@ class DownloadManager(Gtk.Grid):
 
         """
 
-        label.set_text(download.get_destination().split('/')[-1])
+        dest_str = download.get_destination()
+        uri = download.get_request().get_uri()
+        dest_str = dest_str.split('/')[-1] if dest_str else uri
+
+        label.set_text(dest_str)
         label.set_tooltip_text('Failed: {error}'.format(error=error))
         stack.set_visible_child_name('finish')
+        stack.get_children()[1].get_children()[1].hide()
 
         logging.error('DOWNLOAD FAILED: {error}'.format(**locals()))
 
@@ -531,7 +567,11 @@ class DownloadManager(Gtk.Grid):
 
         """
 
-        label.set_text(download.get_destination().split('/')[-1])
+        dest_str = download.get_destination()
+        uri = download.get_request().get_uri()
+        dest_str = dest_str.split('/')[-1] if dest_str else uri
+
+        label.set_text(dest_str)
         label.set_tooltip_text('Finished Downloading')
         stack.set_visible_child_name('finish')
 
@@ -676,14 +716,14 @@ class SessionManager(Gtk.Grid):
         """
 
         # Save all open sessions.
-        logging.info('Saving Sessions...')
         sessions = sessions if sessions else self._sessions
         filename = self._profile.crash_file if to_crash else self._profile.sessions_file
 
         if sessions:
+            logging.info('Saving Sessions...')
             with pathlib.Path(filename) as sessions_file:
                 sessions_file.write_text(json_dumps(sessions, indent=4))
-        logging.info('Saved Sessions.')
+            logging.info('Saved Sessions.')
 
     @property
     def sessions(self) -> list:
@@ -717,6 +757,8 @@ class SessionManager(Gtk.Grid):
 
         for session in sorted(self._sessions, key=lambda i: i['index']):
             self.emit('restore-session', session)
+
+        self.clear()
 
     def restore_selected(self):
         """ Restore all the selected sessions.
@@ -777,10 +819,38 @@ class SessionManager(Gtk.Grid):
         restore_button.connect('clicked', self._restore_clicked, session, grid)
         remove_button.connect('clicked', self._remove_clicked, session, grid)
         check_button.connect('toggled', self._check_toggled, session)
+        check_button.connect('button-release-event',
+                             self._check_button_release, session)
 
         self._session_list.add(grid)
 
         return True
+
+    def _check_button_release(self, button: object, event: object,
+                              session: dict):
+        """ Popup menu.
+
+        """
+
+        # Don't do anything if the pointer was moved off the button.
+        if event.window != event.device.get_window_at_position()[0]:
+            return False
+
+        if event.button == 3:
+            copy_item = Gtk.MenuItem('Copy URL')
+            copy_item.connect('activate', self._copy_clicked, session['uri'])
+            menu = Gtk.Menu()
+            menu.append(copy_item)
+            menu.show_all()
+            menu.popup(None, None, None, None, event.button, event.time)
+
+    def _copy_clicked(self, item: object, uri: str):
+        """ Put uri in clipboard.
+
+        """
+
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(uri, -1)
 
     def _restore_clicked(self, button: object, session: dict, grid: object):
         """ Emit the restore session signal.
@@ -1084,6 +1154,7 @@ class ToggleListSettings(Gtk.Grid):
         # self._edit_uri_title = 'Edit URI'
 
         self._options_list = Gtk.ListBox()
+        self._options_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._options_list.set_vexpand(True)
         self._options_list.set_hexpand(True)
 
@@ -1346,3 +1417,265 @@ class SearchSettings(ToggleListSettings):
         self._edit_uri_title = 'Edit Website URL'
 
         super(SearchSettings, self).__init__(search_dict, parent)
+
+
+class CheckListSettings(Gtk.Grid):
+    """ Creates a list of check button options.  Each option has the ability to
+    be removed or edited.
+
+    """
+
+    __gsignals__ = {
+            'changed': (GObject.SIGNAL_RUN_LAST, None,
+                               (str, str, str)),
+            'set-active': (GObject.SIGNAL_RUN_LAST, None,
+                               (str, str, bool)),
+            'added': (GObject.SIGNAL_RUN_LAST, None,
+                         (str, str)),
+            'removed': (GObject.SIGNAL_RUN_LAST, None,
+                               (str, str)),
+            }
+
+    def __init__(self, options_dict: dict, parent: object = None):
+        """ Create a list for configuring options.
+
+        """
+
+        super(CheckListSettings, self).__init__()
+
+        self._parent = parent
+
+        self._options_dict = options_dict
+        # self._default = ''
+
+        # Change these.
+        # self._add_tooltip = 'Add Option'
+        # self._edit_tooltip = 'Edit Option'
+        # self._remove_tooltip = 'Remove Option'
+        # self._frame_text = 'Options Settings'
+        #
+        # self._add_title = 'Add Option'
+        # self._add_name_title = 'Add Name'
+        # self._add_data_title = 'Add URI'
+        #
+        # self._edit_title = 'Edit Option'
+        # self._edit_name_title = 'Edit Name'
+        # self._edit_data_title = 'Edit URI'
+
+        self._options_list = Gtk.ListBox()
+        self._options_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._options_list.set_vexpand(True)
+        self._options_list.set_hexpand(True)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_shadow_type(Gtk.ShadowType.IN)
+        scroll.add(self._options_list)
+        scroll.set_hexpand(True)
+        scroll.set_vexpand(True)
+
+        icon = Gio.ThemedIcon.new_with_default_fallbacks('list-add-symbolic')
+        button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
+
+        add_button = Gtk.Button()
+        add_button.set_tooltip_text(self._add_tooltip)
+        add_button.set_image(button_img)
+        add_button.set_relief(Gtk.ReliefStyle.NONE)
+        add_button.connect('clicked', self._add_clicked)
+
+        button_grid = Gtk.Grid()
+        button_grid.attach(add_button, 0, 0, 1, 1)
+
+        main_grid = Gtk.Grid()
+        main_grid.set_column_spacing(6)
+        main_grid.set_row_homogeneous(False)
+        main_grid.attach(scroll, 0, 0, 1, 8)
+        main_grid.attach(button_grid, 1, 0, 1, 1)
+        main_grid.set_margin_bottom(6)
+        main_grid.set_margin_top(6)
+        main_grid.set_margin_start(6)
+        main_grid.set_margin_end(6)
+
+        frame_label = Gtk.Label('<b>{self._frame_text}</b>'.format(**locals()))
+        frame_label.set_use_markup(True)
+
+        frame = Gtk.Frame()
+        frame.set_margin_start(3)
+        frame.set_label_widget(frame_label)
+        frame.add(main_grid)
+        frame.set_shadow_type(Gtk.ShadowType.NONE)
+        frame.show_all()
+
+        self.set_size_request(-1, 150)
+        self.attach(frame, 0, 0, 1, 1)
+
+        self.show_all()
+
+        for name, (data, active) in sorted(options_dict.items()):
+            self.add_options(name, data, active)
+
+    def _add_clicked(self, button: object):
+        """ Add a new option.
+
+        """
+
+        name_dialog = EntryDialog(self._add_title, 'list-add-symbolic',
+                                  parent=self._parent, show_uri=True)
+        name_dialog.set_name_title(self._add_name_title)
+        name_dialog.set_uri_title(self._add_data_title)
+        result = name_dialog.run()
+        if not result: return None
+
+        self.add_options(result['name'], result['uri'], False)
+        name = result['name']
+        self.emit('set-active', name, *self._options_dict[name])
+
+    def add_options(self, name: str, data: str, active: bool):
+        """ Add an option to the options_list.
+
+        """
+
+        self._options_dict[name] = (data, active)
+
+        check_button = Gtk.CheckButton.new_with_label(name)
+        check_button.set_hexpand(True)
+        check_button.set_halign(Gtk.Align.START)
+        check_button.connect('toggled', self._check_toggled)
+        check_button.set_active(active)
+
+        icon = Gio.ThemedIcon.new_with_default_fallbacks('text-editor-symbolic')
+        button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
+
+        edit_button = Gtk.Button()
+        edit_button.set_tooltip_text(self._edit_tooltip)
+        edit_button.set_image(button_img)
+        edit_button.set_relief(Gtk.ReliefStyle.NONE)
+
+        icon = Gio.ThemedIcon.new_with_default_fallbacks('list-remove-symbolic')
+        button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
+
+        remove_button = Gtk.Button()
+        remove_button.set_margin_end(6)
+        remove_button.set_tooltip_text(self._remove_tooltip)
+        remove_button.set_image(button_img)
+        remove_button.set_relief(Gtk.ReliefStyle.NONE)
+
+        button_grid = Gtk.Grid()
+        button_grid.attach(check_button, 0, 0, 1, 1)
+        button_grid.attach(edit_button, 1, 0, 1, 1)
+        button_grid.attach(remove_button, 2, 0, 1, 1)
+        button_grid.show_all()
+
+        self._options_list.add(button_grid)
+        remove_button.connect('clicked', self._remove_clicked, button_grid,
+                              check_button)
+        edit_button.connect('clicked', self._edit_clicked, check_button)
+
+    def _remove_clicked(self, remove_button: object, grid: object,
+                        check_button: object):
+        """ Remove this option from the list.
+
+        """
+
+        name = check_button.get_label()
+        data, _ = self._options_dict.pop(name, None)
+
+        self._options_list.remove(grid.get_parent())
+
+        self.emit('set-active', name, data, False)
+
+    def _edit_clicked(self, button: object, check_button: object):
+        """ Remove this option from the list.
+
+        """
+
+        name = check_button.get_label()
+        data, active = self._options_dict.pop(name)
+
+        name_dialog = EntryDialog(self._edit_title, 'list-add-symbolic',
+                                  parent=self._parent, show_uri=True)
+        name_dialog.set_name_title(self._edit_name_title)
+        name_dialog.set_default_name(name)
+        name_dialog.set_uri_title(self._edit_data_title)
+        name_dialog.set_default_uri(data)
+        result = name_dialog.run()
+        if not result:
+            self._options_dict[name] = (data, active)
+        else:
+            new_name = result['name']
+            self._options_dict[result['name']] = (result['uri'], active)
+            check_button.set_label(result['name'])
+            self.emit('set-active', name, result['uri'], False)
+            self.emit('set-active', new_name, *self._options_dict[new_name])
+
+    def get_all(self):
+        """ Return the dict of options engines.
+
+        """
+
+        return self._options_dict
+
+    def _check_toggled(self, check_button: object):
+        """ Emit if check_button is active.
+
+        """
+
+        name = check_button.get_label()
+        if name in self._options_dict:
+            data, _ = self._options_dict[name]
+            self._options_dict[name] = (data, check_button.get_active())
+            self.emit('set-active', name, *self._options_dict[name])
+
+
+class AdBlockSettings(CheckListSettings):
+    """ AdBlock settings.
+
+    """
+
+    def __init__(self, filter_dict: dict, parent: object = None):
+        """ Create a list for configuring adblock.
+
+        """
+
+        # Change these.
+        self._add_tooltip = 'Add New Filter'
+        self._edit_tooltip = 'Edit Filter'
+        self._remove_tooltip = 'Remove Filter'
+        self._frame_text = 'AdBlock Settings'
+
+        self._add_title = 'Add Filter'
+        self._add_name_title = 'Enter Name'
+        self._add_data_title = 'Enter Regex'
+
+        self._edit_title = 'Edit Filter'
+        self._edit_name_title = 'Edit Name'
+        self._edit_data_title = 'Edit Regex'
+
+        super().__init__(filter_dict, parent)
+
+
+class MediaFilterSettings(CheckListSettings):
+    """ AdBlock settings.
+
+    """
+
+    def __init__(self, filter_dict: dict, parent: object = None):
+        """ Create a list for configuring adblock.
+
+        """
+
+        # Change these.
+        self._add_tooltip = 'Add New Filter'
+        self._edit_tooltip = 'Edit Filter'
+        self._remove_tooltip = 'Remove Filter'
+        self._frame_text = 'Media Filter Settings'
+
+        self._add_title = 'Add Filter'
+        self._add_name_title = 'Enter Name'
+        self._add_data_title = 'Enter Regex'
+
+        self._edit_title = 'Edit Filter'
+        self._edit_name_title = 'Edit Name'
+        self._edit_data_title = 'Edit Regex'
+
+        super().__init__(filter_dict, parent)
