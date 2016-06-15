@@ -705,6 +705,7 @@ class MainWindow(object):
             self._window.set_title('{child.title-str} - {self._name}'.format(**locals()))
 
         label = Gtk.Label(child.title_str)
+        label.set_halign(Gtk.Align.START)
         label.set_max_width_chars(48)
         label.set_ellipsize(Pango.EllipsizeMode.END)
         self._tabs.set_menu_label(child.tab_grid, label)
