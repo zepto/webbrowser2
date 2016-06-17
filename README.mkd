@@ -1,0 +1,1 @@
+webbrowser2 is a webkit2gtk web browser.

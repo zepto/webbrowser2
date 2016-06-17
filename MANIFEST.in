@@ -1,0 +1,8 @@
+recursive-include webbrowser2 *
+recursive-include tests *
+include *.py
+include webbrowser2.sh
+include webbrowser2.desktop
+include MANIFEST.in
+include LICENSE.txt
+include README.mkd

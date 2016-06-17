@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Encoding=UTF-8
+Type=Application
+Name=Web Browser
+GenericName=Web Browser
+Comment=A python web browser using webkit2.
+MimeType=text/html;
+Exec=webbrowser2 %u
+Icon=web-browser
+Terminal=false
+StartupNotify=true
+Categories=GTK;Network;WebBrowser;
