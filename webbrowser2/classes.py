@@ -209,14 +209,21 @@ class Profile(dict):
         """
 
         xdg_config = pathlib.Path(GLib.get_user_config_dir())
-        config_path = xdg_config.joinpath('webbrowser2').joinpath(profile)
-        with pathlib.Path(config_path) as conf_path:
-            if not conf_path.exists():
-                conf_path.mkdir()
-            elif not conf_path.is_dir():
+        if not xdg_config.exists():
+            xdg_config.mkdir()
+
+        config_path = xdg_config.joinpath('webbrowser2')
+        if not config_path.exists():
+            config_path.mkdir()
+
+        profile_path = config_path.joinpath(profile)
+        with pathlib.Path(profile_path) as prof_path:
+            if not prof_path.exists():
+                prof_path.mkdir()
+            elif not prof_path.is_dir():
                 logging.error("Can't Save Config")
                 return ''
-        return config_path
+        return profile_path
 
     def save_config(self):
         """ Save the config to a file.
