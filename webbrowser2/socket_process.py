@@ -39,11 +39,11 @@ gi_require_version('Gtk', '3.0')
 gi_require_version('WebKit2', '4.0')
 from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GdkPixbuf
 
-from functions import looks_like_uri, get_config_path, save_dialog
-from classes import ChildDict, Profile, SettingsPopover, SearchSettings
-from classes import SettingsManager, SessionManager, DownloadManager
-from classes import AgentSettings, AdBlockSettings, MediaFilterSettings
-from bookmarks import BookmarkMenu
+from .functions import looks_like_uri, get_config_path, save_dialog
+from .classes import ChildDict, Profile, SettingsPopover, SearchSettings
+from .classes import SettingsManager, SessionManager, DownloadManager
+from .classes import AgentSettings, AdBlockSettings, MediaFilterSettings
+from .bookmarks import BookmarkMenu
 
 
 class MainWindow(object):

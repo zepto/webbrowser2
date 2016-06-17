@@ -32,8 +32,8 @@ import socket
 from json import loads as json_loads
 from json import dumps as json_dumps
 
-from functions import save_dialog
-from bookmarks import EntryDialog
+from .functions import save_dialog
+from .bookmarks import EntryDialog
 
 class ChildDict(dict):
     """ A dictionary that has a send command.

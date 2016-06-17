@@ -28,6 +28,7 @@ from distutils.core import setup
 setup(
     name='webbrowser2',
     packages=['webbrowser2'],
+    scripts=['scripts/webbrowser2'],
     version='1.0.0',
     description='Webkit2 webbrowser',
     long_description=open('README.mkd').read(),

@@ -38,8 +38,8 @@ gi_require_version('Gtk', '3.0')
 gi_require_version('WebKit2', '4.0')
 from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio
 
-from functions import looks_like_uri
-from classes import ChildDict
+from .functions import looks_like_uri
+from .classes import ChildDict
 
 
 class BrowserProc(object):

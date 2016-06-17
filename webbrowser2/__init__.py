@@ -1,7 +1,10 @@
-#!/bin/bash
-# Copyright (C) 2009-2010  Josiah Gordon <josiahg@gmail.com>
+#!/usr/bin/env python
+# vim: sw=4:ts=4:sts=4:fdm=indent:fdl=0:
+# -*- coding: UTF8 -*-
 #
-# browser is free software: you can redistribute it and/or modify
+# Copyright (C) 2016 Josiah Gordon <josiahg@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
@@ -14,7 +17,5 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-BROWSER_PATH=/usr/lib/webbrowser2
-PYTHON=$(which python)
 
-exec $PYTHON $BROWSER_PATH/main.py "$@"
+all=['plug_process', 'socket_process']
