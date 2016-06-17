@@ -29,6 +29,7 @@ setup(
     name='webbrowser2',
     packages=['webbrowser2'],
     scripts=['scripts/webbrowser2'],
+    data_files=[('/usr/share/applications/', ['webbrowser2.desktop'],)],
     version='1.0.0',
     description='Webkit2 webbrowser',
     long_description=open('README.mkd').read(),

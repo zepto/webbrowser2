@@ -2,8 +2,8 @@
 Version=1.0
 Encoding=UTF-8
 Type=Application
-Name=Web Browser
-GenericName=Web Browser
+Name=Web Browser 2
+GenericName=Web Browser 2
 Comment=A python web browser using webkit2.
 MimeType=text/html;
 Exec=webbrowser2 %u
