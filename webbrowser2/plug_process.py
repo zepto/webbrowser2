@@ -504,7 +504,7 @@ class BrowserProc(object):
         request = navigation_action.get_request()
         if request:
             uri = request.get_uri()
-            if self._is_add_match(uri):
+            if self._is_ad_match(uri):
                 logging.info('Blocking: {uri}'.format(**locals()))
                 return None
 
@@ -756,8 +756,8 @@ class BrowserProc(object):
         request.deny()
         return True
 
-    def _is_add_match(self, uri: str) -> bool:
-        """ Returns true if uri looks like an add.
+    def _is_ad_match(self, uri: str) -> bool:
+        """ Returns true if uri looks like an ad.
 
         """
 
@@ -817,7 +817,7 @@ class BrowserProc(object):
             #         decision.ignore()
             #         return True
 
-            if self._is_add_match(uri):
+            if self._is_ad_match(uri):
                 logging.info('Blocking: {uri}'.format(**locals()))
                 decision.ignore()
                 return True
@@ -831,7 +831,7 @@ class BrowserProc(object):
             uri = response.get_uri()
             logging.debug('RESPONSE {uri}'.format(**locals()))
 
-            if self._is_add_match(uri):
+            if self._is_ad_match(uri):
                 logging.info('Blocking: {uri}'.format(**locals()))
                 decision.ignore()
                 return True
