@@ -501,6 +501,13 @@ class BrowserProc(object):
 
         """
 
+        request = navigation_action.get_request()
+        if request:
+            uri = request.get_uri()
+            if self._is_add_match(uri):
+                logging.info('Blocking: {uri}'.format(**locals()))
+                return None
+
         return self._new_tab(view_dict, {'focus': False}).webview
 
     def _context_menu(self, webview: object, menu: object, event: object,
