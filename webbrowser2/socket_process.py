@@ -1334,6 +1334,7 @@ class MainWindow(object):
             pid = self._new_proc(*self._make_tab(**settings))
         else:
             settings['index'] = self._tabs.get_current_page() + 1
+            settings['order'] = child.order + 1
             child.send('new-tab', settings)
 
     @button_release
