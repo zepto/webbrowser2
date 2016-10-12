@@ -76,10 +76,8 @@ class MainWindow(object):
         width = screen.get_width() // 2
         height = math.floor(screen.get_height() * 9 // 10)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('text-x-generic-symbolic')
-        icon_info = Gtk.IconTheme().choose_icon(icon.get_names(), 16,
-                                                Gtk.IconLookupFlags.USE_BUILTIN)
-        self._html_pixbuf = icon_info.load_icon()
+        self._blank_gicon = Gio.ThemedIcon.new_with_default_fallbacks(
+                'text-x-generic-symbolic')
 
         self._stop_icon = Gio.ThemedIcon.new_with_default_fallbacks(
                 'process-stop-symbolic')
@@ -580,10 +578,10 @@ class MainWindow(object):
                 loader.write(data)
                 loader.close()
                 pixbuf = loader.get_pixbuf()
+                window['icon'].set_from_pixbuf(pixbuf)
             else:
-                pixbuf = self._html_pixbuf
-            window['icon-image'] = pixbuf
-            window['icon'].set_from_pixbuf(pixbuf)
+                window['icon'].set_from_gicon(self._blank_gicon,
+                                              Gtk.IconSize.BUTTON)
 
         if signal == 'load-status' and data == 0:
             window.address_entry.set_name('')
@@ -853,8 +851,7 @@ class MainWindow(object):
         playing_icon.set_margin_top(6)
         playing_icon.set_margin_bottom(6)
 
-        icon = Gtk.Image()
-        icon.set_from_pixbuf(self._html_pixbuf)
+        icon = Gtk.Image.new_from_gicon(self._blank_gicon, Gtk.IconSize.BUTTON)
 
         spinner = Gtk.Spinner()
         icon_stack = Gtk.Stack()
@@ -932,7 +929,6 @@ class MainWindow(object):
             'forward-button': forward_button,
             'spinner': spinner,
             'icon': icon,
-            'icon-image': self._html_pixbuf,
             'address-entry': address_entry,
             'label': label,
             'socket': socket,
