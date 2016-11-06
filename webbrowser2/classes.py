@@ -396,6 +396,11 @@ class DownloadManager(Gtk.Grid):
         finish_label.set_vexpand(True)
         finish_label.set_hexpand(True)
 
+        finish_label_event = Gtk.EventBox()
+        finish_label_event.add(finish_label)
+        finish_label_event.connect('button-release-event',
+                                   self._finish_button_release, uri)
+
         icon = Gio.ThemedIcon.new_with_default_fallbacks('document-open-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
@@ -416,7 +421,7 @@ class DownloadManager(Gtk.Grid):
         finish_grid = Gtk.Grid()
         finish_grid.set_hexpand(True)
         finish_grid.set_column_homogeneous(False)
-        finish_grid.attach(finish_label, 0, 0, 1, 1)
+        finish_grid.attach(finish_label_event, 0, 0, 1, 1)
         finish_grid.attach(open_button, 1, 0, 1, 1)
         finish_grid.attach(remove_button, 2, 0, 1, 1)
         finish_grid.show_all()
@@ -455,6 +460,24 @@ class DownloadManager(Gtk.Grid):
                               download_stack, download)
         remove_button.connect('clicked', self._close_button_clicked,
                               download_stack, download)
+
+    def _finish_button_release(self, button: object, event: object,
+                               uri: str):
+        """ Popup menu.
+
+        """
+
+        # Don't do anything if the pointer was moved off the button.
+        if event.window != event.device.get_window_at_position()[0]:
+            return False
+
+        if event.button == 3:
+            copy_item = Gtk.MenuItem('Copy URL')
+            copy_item.connect('activate', self._copy_clicked, uri)
+            menu = Gtk.Menu()
+            menu.append(copy_item)
+            menu.show_all()
+            menu.popup(None, None, None, None, event.button, event.time)
 
     def cancel_all(self):
         """ Cancel all downloads.
