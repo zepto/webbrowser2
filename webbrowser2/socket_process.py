@@ -491,7 +491,7 @@ class MainWindow(object):
                                               focus=session['focus'])
             self._pid_map[pid] = self._new_proc(init_dict, child)
             child.set_state(session['state'])
-            child.order = session.get('order', 0)
+            # child.order = session.get('order', 0)
             self._tabs.reorder_child(child.tab_grid, session['index'])
         child.send('restore-session', session)
 
