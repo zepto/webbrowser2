@@ -737,7 +737,8 @@ class SessionManager(Gtk.Grid):
             sessions = json_loads(sessions_file.read_text())
             sessions_file.unlink()
 
-        return sessions
+        # Only return non-empty sessions.
+        return [i for i in sessions if i]
 
     def save_sessions(self, sessions: list = [], to_crash: bool = False):
         """ Save sessions_dict to the sessions file unless to_crash is True,
