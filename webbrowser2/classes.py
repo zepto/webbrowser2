@@ -323,6 +323,7 @@ class DownloadManager(Gtk.Grid):
         scroll.add(self._download_list)
         scroll.set_hexpand(True)
         scroll.set_vexpand(True)
+        self._scroll = scroll
 
         main_stack = Gtk.Stack()
         main_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
@@ -348,6 +349,19 @@ class DownloadManager(Gtk.Grid):
 
         self.show_all()
         main_stack.set_visible_child_name('empty')
+
+    def _download_size_allocate(self, download_list, rect):
+        """ Scroll to the bottom of the download list.
+
+        """
+
+        # Scroll to the bottom.
+        v_adj = self._scroll.get_vadjustment()
+        v_adj.set_value(v_adj.get_upper() - v_adj.get_page_size())
+
+        # Disconnect so it won't always scroll to the bottom when the
+        # mouse is moved.
+        self._download_list.disconnect_by_func(self._download_size_allocate)
 
     def new_download(self, uri: str, start: bool = True):
         """ Add a download to the list.
@@ -435,6 +449,10 @@ class DownloadManager(Gtk.Grid):
         download_stack.show_all()
 
         self._download_list.add(download_stack)
+
+        # Scroll to the bottom when the download list is displayed.
+        self._download_list.connect('size-allocate',
+                                    self._download_size_allocate)
 
         if start:
             context = WebKit2.WebContext.get_default()
@@ -667,6 +685,7 @@ class SessionManager(Gtk.Grid):
         scroll.add(self._session_list)
         scroll.set_hexpand(True)
         scroll.set_vexpand(True)
+        self._scroll = scroll
 
         main_stack = Gtk.Stack()
         main_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
@@ -718,6 +737,19 @@ class SessionManager(Gtk.Grid):
         self._sessions = []
         for session in sorted(self.load_sessions(), key=lambda i: i['index']):
             self.add_session(session)
+
+    def _session_size_allocate(self, session_list, rect):
+        """ Scroll to the bottom of the session list.
+
+        """
+
+        # Scroll to the bottom.
+        v_adj = self._scroll.get_vadjustment()
+        v_adj.set_value(v_adj.get_upper() - v_adj.get_page_size())
+
+        # Disconnect so it won't always scroll to the bottom when the
+        # mouse is moved.
+        self._session_list.disconnect_by_func(self._session_size_allocate)
 
     def load_sessions(self) -> list:
         """ First check for the sessions file, and if it exists return the
@@ -854,6 +886,9 @@ class SessionManager(Gtk.Grid):
                              self._check_button_release, session)
 
         self._session_list.add(grid)
+        # Scroll to the bottom when displayed.
+        self._session_list.connect('size-allocate',
+                                   self._session_size_allocate)
 
         return True
 
