@@ -1254,7 +1254,12 @@ class MainWindow(object):
 
         for index, item in enumerate(hist_list):
             item_text = item['title'] if item['title'] else item['uri']
-            menu_item = Gtk.MenuItem(item_text)
+            label = Gtk.Label(item_text)
+            label.set_halign(Gtk.Align.START)
+            label.set_max_width_chars(48)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            menu_item = Gtk.MenuItem()
+            menu_item.add(label)
             menu_item.connect('button-release-event',
                               lambda itm, evnt, chld: \
                                       self._history_go(evnt, chld, itm.index),
