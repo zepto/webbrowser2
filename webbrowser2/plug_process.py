@@ -189,6 +189,7 @@ class BrowserProc(object):
         signal_handlers = (
                 ('motion-notify-event',
                     lambda *a: view_dict.send('mouse-motion', True)),
+                ('button-release-event', self._button_release, view_dict),
                 ('decide-policy', self._policy, view_dict),
                 ('permission-request', self._permission, view_dict),
                 ('create', self._new_window, view_dict),
@@ -1144,6 +1145,21 @@ class BrowserProc(object):
 
         logging.info("FOUND: {match_count}".format(**locals()))
         view_dict.send('find-failed', False)
+
+    def _button_release(self, webview: object, event: object, view_dict: dict):
+        """ Check for mouse button release, and go forward or back in history
+        if button 9 or 8 is released respectively.
+
+        """
+
+        if event.button == 9:
+            webview.go_forward()
+            return True
+        elif event.button == 8:
+            webview.go_back()
+            return True
+
+        return False
 
     def run(self):
         """ Run the main Gtk loop.
