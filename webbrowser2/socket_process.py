@@ -696,7 +696,7 @@ class MainWindow(object):
 
         """
 
-        child.title_str = '{title} (pid: {pid}) {private_str}'.format(**child)
+        child.title_str = '{title} (pid: {pid}) {private-str}'.format(**child)
         child.label.set_text(child.title_str)
         child.event_box.set_tooltip_text(child.title_str)
         if child == self._get_child_dict():
@@ -918,7 +918,6 @@ class MainWindow(object):
             'focus': focus,
             'private': private,
             'private-str': 'Private' if private else '',
-            'title-str': '{title} (pid: {pid}) {private-str}'.format(**child),
             'cert-data': (False, False, {}, 0),
             'back-list': [],
             'current-dict': {},
@@ -953,6 +952,7 @@ class MainWindow(object):
             'order': 0,
             })
 
+        child['title-str'] = '{title} (pid: {pid}) {private-str}'.format(**child),
         eventbox.set_size_request(child.normal_width, -1)
 
         self._windows[socket_id] = child
