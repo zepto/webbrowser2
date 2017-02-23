@@ -699,22 +699,23 @@ class SessionManager(Gtk.Grid):
                                         lambda button: self.restore_selected())
         self._restore_selected_button.set_sensitive(False)
 
-        restore_all_button = Gtk.Button('Restore All')
-        restore_all_button.set_tooltip_text('Restore all Sessions in list')
-        restore_all_button.connect('clicked',
+        self._restore_all_button = Gtk.Button('Restore All')
+        self._restore_all_button.set_tooltip_text('Restore all Sessions.')
+        self._restore_all_button.connect('clicked',
                                    lambda button: self.restore_all())
-        restore_all_button.set_sensitive(False)
+        self._restore_all_button.set_sensitive(False)
 
-        clear_button = Gtk.Button('Clear List')
-        clear_button.set_tooltip_text('Remove all Sessions from list')
-        clear_button.connect('clicked', lambda button: self.clear())
+        self._clear_button = Gtk.Button('Clear List')
+        self._clear_button.set_tooltip_text('Remove all Sessions.')
+        self._clear_button.connect('clicked', lambda button: self.clear())
+        self._clear_button.set_sensitive(False)
 
         button_grid = Gtk.Grid()
         button_grid.set_column_spacing(6)
         button_grid.set_column_homogeneous(True)
-        button_grid.attach(restore_all_button, 0, 0, 1, 1)
+        button_grid.attach(self._restore_all_button, 0, 0, 1, 1)
         button_grid.attach(self._restore_selected_button, 1, 0, 1, 1)
-        button_grid.attach(clear_button, 2, 0, 1, 1)
+        button_grid.attach(self._clear_button, 2, 0, 1, 1)
         button_grid.set_halign(Gtk.Align.END)
 
         self.set_row_spacing(6)
@@ -728,10 +729,8 @@ class SessionManager(Gtk.Grid):
         self.show_all()
         main_stack.set_visible_child_name('empty')
 
-        self._session_list.connect('remove', self._session_removed, main_stack,
-                                   restore_all_button)
-        self._session_list.connect('add', self._session_added, main_stack,
-                                   restore_all_button)
+        self._session_list.connect('remove', self._session_removed, main_stack)
+        self._session_list.connect('add', self._session_added, main_stack)
 
         self._selected = []
         self._sessions = []
@@ -813,6 +812,9 @@ class SessionManager(Gtk.Grid):
         self._sessions.clear()
         self._selected.clear()
 
+        self._restore_all_button.set_sensitive(False)
+        self._clear_button.set_sensitive(False)
+
     def restore_all(self):
         """ Restore all sessions.
 
@@ -829,9 +831,12 @@ class SessionManager(Gtk.Grid):
         """
 
         self._selected.sort(key=lambda i: i[0]['index'])
-        for session, button in self._selected[:]:
+        for session, button, grid in self._selected[:]:
             self.emit('restore-session', session)
             button.set_active(False)
+            self._session_list.remove(grid.get_parent())
+            self._sessions.remove(session)
+
         self._selected.clear()
 
     def add_session(self, session: dict) -> bool:
@@ -881,7 +886,7 @@ class SessionManager(Gtk.Grid):
 
         restore_button.connect('clicked', self._restore_clicked, session, grid)
         remove_button.connect('clicked', self._remove_clicked, session, grid)
-        check_button.connect('toggled', self._check_toggled, session)
+        check_button.connect('toggled', self._check_toggled, session, grid)
         check_button.connect('button-release-event',
                              self._check_button_release, session)
 
@@ -936,38 +941,38 @@ class SessionManager(Gtk.Grid):
         self._session_list.remove(grid.get_parent())
         self._sessions.remove(session)
 
-    def _check_toggled(self, button: object, session: dict):
+    def _check_toggled(self, button: object, session: dict, grid: object):
         """ Add session and button to self._selected.
 
         """
 
         if button.get_active():
-            self._selected.append((session, button))
+            self._selected.append((session, button, grid))
         else:
-            self._selected.remove((session, button))
+            self._selected.remove((session, button, grid))
 
         self._restore_selected_button.set_sensitive(bool(self._selected))
         # self._clear_selected.set_sensitive(bool(self._selected))
 
-    def _session_removed(self, listbox: object, widget: object, stack: object,
-                         restore_all_button: object):
+    def _session_removed(self, listbox: object, widget: object, stack: object):
         """ Add a label if the listbox is empty.
 
         """
 
         if not listbox.get_children():
             stack.set_visible_child_name('empty')
-            restore_all_button.set_sensitive(False)
+            self._restore_all_button.set_sensitive(False)
+            self._clear_button.set_sensitive(False)
             self._restore_selected_button.set_sensitive(False)
 
-    def _session_added(self, listbox: object, widget: object, stack: object,
-                       restore_all_button: object):
+    def _session_added(self, listbox: object, widget: object, stack: object):
         """ Remove the label if a download is added.
 
         """
 
         stack.set_visible_child_name('sessions')
-        restore_all_button.set_sensitive(True)
+        self._restore_all_button.set_sensitive(True)
+        self._clear_button.set_sensitive(True)
 
 
 class SettingsManager(Gtk.Grid):
