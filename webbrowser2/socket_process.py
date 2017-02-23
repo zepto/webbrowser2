@@ -1093,7 +1093,6 @@ class MainWindow(object):
             item.show_all()
             popup.prepend(item)
 
-
     def _findbar_toggle(self, *args):
         """ Toggle findbar visibility.
 
@@ -1285,7 +1284,6 @@ class MainWindow(object):
             self._open_new_tab(event.state, settings, child)
         else:
             child.send('history-go-to', index)
-
 
     @button_release
     def _address_entry_icon_release(self, entry: object, icon_pos: object,
