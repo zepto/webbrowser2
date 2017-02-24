@@ -737,7 +737,7 @@ class SessionManager(Gtk.Grid):
         for session in sorted(self.load_sessions(), key=lambda i: i['index']):
             self.add_session(session)
 
-    def _session_size_allocate(self, session_list, rect):
+    def _session_size_allocate(self, session_list: object, rect: object):
         """ Scroll to the bottom of the session list.
 
         """
