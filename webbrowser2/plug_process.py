@@ -308,7 +308,8 @@ class BrowserProc(object):
 
         webview = view_dict.webview
         uri = webview.get_uri()
-        logging.info(f'IS BLANK {uri} {webview.can_go_back()} {webview.can_go_forward()}')
+        logging.info((f'IS BLANK {uri} {webview.can_go_back()} '
+                      f'{webview.can_go_forward()}'))
 
         return not (webview.can_go_back() or webview.can_go_forward() or
                     (uri and uri != 'about:blank'))
