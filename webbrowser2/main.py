@@ -65,35 +65,35 @@ def main(main_proc: object, main_cpipe: object):
             break
         if signal == 'refresh':
             # Make sure all children exit.
-            logging.info('\n'.join(['PID: %s of %s' % (t.pid, t) for t in active_children()]))
+            logging.info('\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
             for pid, proc in window_dict.items():
-                logging.info('PROCESS: {pid}'.format(pid=pid))
+                logging.info(f'PROCESS: {pid}')
         if signal == 'new-proc':
             proc = Process(target=run_browser, args=(data,))
             proc.start()
             main_cpipe.send(('proc-pid', proc.pid))
-            logging.info("MAIN_LOOP NEW_PROC: {data}".format(data=data))
+            logging.info(f"MAIN_LOOP NEW_PROC: {data}")
             window_dict[proc.pid] = proc
-            logging.info("child pid: {pid}".format(pid=proc.pid))
-            logging.info('window_dict: {window_dict}'.format(**locals()))
+            logging.info(f"child pid: {proc.pid}")
+            logging.info(f'window_dict: {window_dict}')
 
         elif signal == 'terminate':
             proc = window_dict.pop(data, None)
             if proc:
-                logging.info('Joining pid: {data}'.format(data=data))
+                logging.info(f'Joining pid: {data}')
                 proc.join(1)
                 if proc.is_alive():
-                    logging.info("Terminating: {proc}".format(**locals()))
+                    logging.info(f"Terminating: {proc}")
                     proc.terminate()
 
     logging.info("Quitting")
 
     logging.info(window_dict)
     for pid, proc in window_dict.items():
-        logging.info("Joining: {proc}".format(**locals()))
+        logging.info(f"Joining: {proc}")
         proc.join(1)
         if proc.is_alive():
-            logging.info("Terminating: {proc}".format(**locals()))
+            logging.info(f"Terminating: {proc}")
             proc.terminate()
 
     # Make sure all children exit.
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     main_p = Process(target=run_main, args=(main_ppipe,),
                      kwargs={'profile': args.profile, 'uri_list': args.uri})
     main_p.start()
-    logging.info("main pid: {main_p.pid}".format(**locals()))
+    logging.info(f"main pid: {main_p.pid}")
 
     main(main_p, main_cpipe)
 
@@ -141,7 +141,7 @@ if __name__ == '__main__':
 
     main_p.join(1)
     if main_p.is_alive():
-        logging.info("Terminating main: {main_p.pid}".format(**locals()))
+        logging.info(f"Terminating main: {main_p.pid}")
         main_p.terminate()
     main_ppipe.close()
     main_cpipe.close()

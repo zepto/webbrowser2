@@ -571,7 +571,7 @@ class DownloadManager(Gtk.Grid):
         """
 
         progress_bar.set_text(destination.split('/')[-1])
-        logging.info('DOWNLOAD DESTINATION {destination}'.format(**locals()))
+        logging.info(f'DOWNLOAD DESTINATION {destination}')
 
     def _download_decide_destination(self, download: object,
                                      suggested_filename: str) -> bool:
@@ -579,7 +579,7 @@ class DownloadManager(Gtk.Grid):
 
         """
 
-        logging.info('DOWNLOAD TO {suggested_filename}'.format(**locals()))
+        logging.info(f'DOWNLOAD TO {suggested_filename}')
         folder = GLib.get_user_special_dir(GLib.USER_DIRECTORY_DOWNLOAD)
         filename = save_dialog(suggested_filename, folder, self._parent,
                                'Download To')
@@ -587,7 +587,7 @@ class DownloadManager(Gtk.Grid):
             download.cancel()
             return True
 
-        logging.info('Setting it to {filename}'.format(**locals()))
+        logging.info(f'Setting it to {filename}')
         download.set_allow_overwrite(True)
         download.set_destination(GLib.filename_to_uri(filename))
 
@@ -604,11 +604,11 @@ class DownloadManager(Gtk.Grid):
         dest_str = dest_str.split('/')[-1] if dest_str else uri
 
         label.set_text(dest_str)
-        label.set_tooltip_text('Failed: {error}'.format(error=error))
+        label.set_tooltip_text(f'Failed: {error}')
         stack.set_visible_child_name('finish')
         stack.get_children()[1].get_children()[1].hide()
 
-        logging.error('DOWNLOAD FAILED: {error}'.format(**locals()))
+        logging.error(f'DOWNLOAD FAILED: {error}')
 
     def _download_finished(self, download: object, label: object, stack: object):
         """ Download finished.
@@ -634,7 +634,7 @@ class DownloadManager(Gtk.Grid):
         uri = download.get_property(response.name).get_uri()
         progress_bar.set_tooltip_text(uri)
 
-        logging.info('DOWNLOAD RESPONSE: {uri}'.format(**locals()))
+        logging.info(f'DOWNLOAD RESPONSE: {uri}')
 
     def _download_progress(self, download: object, progress: float,
                            progress_bar: object):
@@ -645,7 +645,7 @@ class DownloadManager(Gtk.Grid):
         progress = download.get_property(progress.name)
         progress_bar.set_fraction(progress)
 
-        logging.debug('DOWNLOAD PROGRESS: {progress}'.format(**locals()))
+        logging.debug(f'DOWNLOAD PROGRESS: {progress}')
 
 
 class SessionManager(Gtk.Grid):
@@ -1118,7 +1118,7 @@ class SettingsManager(Gtk.Grid):
         grid.attach(entry, 0, 0, 1, 1)
         grid.attach(apply_button, 1, 0, 1, 1)
 
-        frame_label = Gtk.Label('<b>{title}</b>'.format(title=title))
+        frame_label = Gtk.Label(f'<b>{title}</b>')
         frame_label.set_use_markup(True)
 
         frame = Gtk.Frame()
@@ -1258,7 +1258,7 @@ class ToggleListSettings(Gtk.Grid):
         main_grid.set_margin_start(6)
         main_grid.set_margin_end(6)
 
-        frame_label = Gtk.Label('<b>{self._frame_text}</b>'.format(**locals()))
+        frame_label = Gtk.Label(f'<b>{self._frame_text}</b>')
         frame_label.set_use_markup(True)
 
         frame = Gtk.Frame()
@@ -1567,7 +1567,7 @@ class CheckListSettings(Gtk.Grid):
         main_grid.set_margin_start(6)
         main_grid.set_margin_end(6)
 
-        frame_label = Gtk.Label('<b>{self._frame_text}</b>'.format(**locals()))
+        frame_label = Gtk.Label(f'<b>{self._frame_text}</b>')
         frame_label.set_use_markup(True)
 
         frame = Gtk.Frame()

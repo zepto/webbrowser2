@@ -382,14 +382,14 @@ class MainWindow(object):
         try:
             child.send('close', True)
         except BrokenPipeError as err:
-            logging.error('Broken Pipe: {err}'.format(**locals()))
+            logging.error(f'Broken Pipe: {err}')
 
     def _delete_event(self, window: object, event: object):
         """ Try to close all tabs first.
 
         """
 
-        logging.info("DELETE EVENT: {event}".format(**locals()))
+        logging.info(f"DELETE EVENT: {event}")
 
         if not event:
             if self._is_closing:
@@ -526,9 +526,9 @@ class MainWindow(object):
                       'estimated-load-progress', 'hover-link',
                       'session-data', 'closed']
         if signal in debug_list:
-            logging.debug("_CALLBACK: {signal} => {data}".format(**locals()))
+            logging.debug(f"_CALLBACK: {signal} => {data}")
         else:
-            logging.info("_CALLBACK: {signal} => {data}".format(**locals()))
+            logging.info(f"_CALLBACK: {signal} => {data}")
 
         if signal == 'closed':
             session = data['session']
@@ -539,7 +539,7 @@ class MainWindow(object):
                 self._session_manager.add_session(window.session_dict)
 
             if data['is-last']:
-                logging.info('Sending terminate for: {pid}'.format(**window))
+                logging.info(f'Sending terminate for: {window.pid}')
                 self._send('terminate', window.pid)
 
             self._tabs.remove_page(self._tabs.page_num(window.tab_grid))
@@ -553,7 +553,7 @@ class MainWindow(object):
             window.address_bar.set_visible(not self._profile.hide_address_bar)
 
         if signal == 'tab-info':
-            logging.info('TAB_INFO: {data}'.format(data=data))
+            logging.info(f'TAB_INFO: {data}')
             socket_id, child = self._add_tab(data['com-pipe'],
                                              data['child-pipe'], data['focus'],
                                              uri=data['uri'],
@@ -619,7 +619,7 @@ class MainWindow(object):
         if signal == 'is-secure':
             insecure_str = ''
             verified, issuer_known, certificate, flags = data
-            logging.info("ISSUER KNOWN: {issuer_known}".format(**locals()))
+            logging.info(f"ISSUER KNOWN: {issuer_known}")
 
             window.cert_data = data if certificate else ()
 
@@ -638,7 +638,7 @@ class MainWindow(object):
                 verified_str = 'Page is insecure.'
                 window.address_entry.set_name('unverified')
 
-            tooltip_text = '{verified_str} {insecure_str}'.format(**locals())
+            tooltip_text = f'{verified_str} {insecure_str}'
             window.address_entry.set_tooltip_text(tooltip_text)
 
         if signal == 'insecure-content':
@@ -684,7 +684,7 @@ class MainWindow(object):
         """
 
         signal, data = self._pipe.recv()
-        logging.info('RECIEVE: {signal} => {data}'.format(**locals()))
+        logging.info(f'RECIEVE: {signal} => {data}')
 
         if signal == 'add-tab':
             pid = self._new_proc(*self._make_tab(**data))
@@ -696,11 +696,11 @@ class MainWindow(object):
 
         """
 
-        child.title_str = '{title} (pid: {pid}) {private-str}'.format(**child)
+        child.title_str = f'{child.title} (pid: {child.pid}) {child.private_str}'
         child.label.set_text(child.title_str)
         child.event_box.set_tooltip_text(child.title_str)
         if child == self._get_child_dict():
-            self._window.set_title('{child.title-str} - {self._name}'.format(**locals()))
+            self._window.set_title(f'{child.title_str} - {self._name}')
 
         label = Gtk.Label(child.title_str)
         label.set_halign(Gtk.Align.START)
@@ -952,7 +952,7 @@ class MainWindow(object):
             'order': 0,
             })
 
-        child['title-str'] = '{title} (pid: {pid}) {private-str}'.format(**child),
+        child['title-str'] = f'{child.title} (pid: {child.pid}) {child.private_str}'
         eventbox.set_size_request(child.normal_width, -1)
 
         self._windows[socket_id] = child
@@ -1220,7 +1220,7 @@ class MainWindow(object):
         if event.button == 3:
             menu = self._make_history_menu(hist_list, True, child)
             menu.popup(None, None, None, None, event.button, event.time)
-            logging.debug('{hist_list} {event.time}'.format(**locals()))
+            logging.debug(f'{hist_list} {event.time}')
         else:
             self._history_go(event, child, index=index)
 
@@ -1363,7 +1363,7 @@ class MainWindow(object):
 
         """
 
-        logging.info('{tab_grid} {index}'.format(**locals()))
+        logging.info(f'{tab_grid} {index}')
 
     def _tab_switched(self, notebook: object, tab_grid: object, index: int):
         """ Do stuff when the tab is switched.
@@ -1379,8 +1379,7 @@ class MainWindow(object):
 
         child_dict = self._get_child_dict(tab_grid)
         child_dict.focus = True
-        self._window.set_title('{title-str} - {name}'.format(**child_dict,
-                                                             name=self._name))
+        self._window.set_title(f'{child_dict.title_str} - {self._name}')
         # Set the order to one greater than the last tab, so when this
         # tab is closed the last one will be selected.
         if child_dict != prev_child: child_dict.order = prev_child.order + 1
@@ -1503,7 +1502,7 @@ class MainWindow(object):
 
         """
 
-        logging.info('Switch tab {val} {keyval}'.format(val=(keyval - 49),keyval=keyval))
+        logging.info(f'Switch tab {keyval - 49} {keyval}')
         if self._tabs.get_n_pages() > (keyval - 49):
             self._tabs.set_current_page(keyval - 49)
 
@@ -1535,7 +1534,7 @@ class MainWindow(object):
 
         """
 
-        logging.info("PLUG REMOVED: {child.uri}".format(**locals()))
+        logging.info(f"PLUG REMOVED: {child.uri}")
         self._send('terminate', child['pid'])
         self._restore_session(child.session_dict)
 
@@ -1552,7 +1551,7 @@ class MainWindow(object):
 
         """
 
-        logging.info('PLUG ADDED to {child.tab_grid}'.format(**locals()))
+        logging.info(f'PLUG ADDED to {child.tab_grid}')
         # child.tab_grid.show_all()
         # child.find_bar.hide()
         # if child.focus:
@@ -1606,7 +1605,7 @@ class MainWindow(object):
         """
 
         data = self._socket.recv(4096)
-        logging.info("EXTERN SIGNAL: {data}".format(**locals()))
+        logging.info(f"EXTERN SIGNAL: {data}")
 
         try:
             signal, data = json_loads(data.decode())

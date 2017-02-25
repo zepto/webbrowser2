@@ -93,7 +93,7 @@ class BrowserProc(object):
         self._windows = []
 
         socket_id, com_pipe = com_dict['socket-id'], com_dict['com-pipe']
-        logging.info("CREATING: {socket_id} {com_pipe}".format(**locals()))
+        logging.info(f"CREATING: {socket_id} {com_pipe}")
         view_dict = self._create_window(socket_id, com_pipe)
         view_dict.load(com_dict.get('uri', 'about:blank'))
         self._windows.append(view_dict)
@@ -103,7 +103,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("PRIVATE: {self._private}".format(**locals()))
+        logging.info(f"PRIVATE: {self._private}")
 
         if webview: return webview.new_with_related_view()
 
@@ -117,7 +117,7 @@ class BrowserProc(object):
 
         settings = webview.get_settings()
         for prop, value in self._web_view_settings.items():
-            logging.info("setting: {prop} => {value}".format(**locals()))
+            logging.info(f"setting: {prop} => {value}")
             try:
                 settings.set_property(prop, value)
             except TypeError as err:
@@ -249,7 +249,7 @@ class BrowserProc(object):
         try:
             com_pipe.send((signal, data))
         except BrokenPipeError as err:
-            logging.error("PIPE BROKE CLOSING: {err}".format(**locals()))
+            logging.error(f"PIPE BROKE CLOSING: {err}")
 
     def _restore_session(self, session_data: bytes, view_dict: dict) -> bool:
         """ Restores the session for view_dict.
@@ -308,8 +308,7 @@ class BrowserProc(object):
 
         webview = view_dict.webview
         uri = webview.get_uri()
-        logging.info('IS BLANK {uri} {back} {forward}'.format(uri=uri,
-            back=webview.can_go_back(), forward=webview.can_go_forward()))
+        logging.info(f'IS BLANK {uri} {webview.can_go_back()} {webview.can_go_forward()}')
 
         return not (webview.can_go_back() or webview.can_go_forward() or
                     (uri and uri != 'about:blank'))
@@ -353,7 +352,7 @@ class BrowserProc(object):
             # Close all temporary files.
             for f in self._tmp_files: f.close()
 
-            logging.info("DESTROYING: {self._pid}".format(**locals()))
+            logging.info(f"DESTROYING: {self._pid}")
             Gtk.main_quit()
 
         send_dict = {
@@ -363,9 +362,9 @@ class BrowserProc(object):
         try:
             view_dict.send('closed', send_dict)
         except BrokenPipeError as err:
-            logging.error("PIPE BROKE CLOSING: {err}".format(**locals()))
+            logging.error(f"PIPE BROKE CLOSING: {err}")
 
-        logging.info("CLOSED {view_dict.webview}".format(**locals()))
+        logging.info(f"CLOSED {view_dict.webview}")
         view_dict.com_pipe.close()
         view_dict.clear()
 
@@ -374,14 +373,14 @@ class BrowserProc(object):
 
         """
 
-        logging.debug("IN RECIEVE: {view_dict.com_pipe}".format(**locals()))
+        logging.debug(f"IN RECIEVE: {view_dict.com_pipe}")
 
         signal, data = view_dict.recv()
 
         if signal in ['restore-session']:
-            logging.debug('SIGNAL: {signal}, DATA: {data}'.format(**locals()))
+            logging.debug(f'SIGNAL: {signal}, DATA: {data}')
         else:
-            logging.info('SIGNAL: {signal}, DATA: {data}'.format(**locals()))
+            logging.info(f'SIGNAL: {signal}, DATA: {data}')
 
         if signal == 'close' and data:
             view_dict.plug.emit('delete-event', None)
@@ -506,7 +505,7 @@ class BrowserProc(object):
         if request:
             uri = request.get_uri()
             if self._is_ad_match(uri):
-                logging.info('Blocking: {uri}'.format(**locals()))
+                logging.info(f'Blocking: {uri}')
                 return None
 
         return self._new_tab(view_dict, {'focus': False}).webview
@@ -709,7 +708,7 @@ class BrowserProc(object):
             # Data looks like a uri but it doesn't start with
             # somthing:// so prepend http:// to it.
             if not data.startswith(('http://', 'https://', 'ftp://')):
-                data = 'http://%s' % data
+                data = f'http://{data}'
 
             webview.load_uri(data)
 
@@ -743,9 +742,9 @@ class BrowserProc(object):
                         }
                 view_dict.send('download', info_dict)
 
-        logging.debug("RESOURCE {uri}".format(**locals()))
+        logging.debug(f"RESOURCE {uri}")
         if webview.get_uri().startswith('https') and uri.startswith('http:'):
-            logging.info("INSECURE RESOURCE: {uri}".format(uri=uri))
+            logging.info(f"INSECURE RESOURCE: {uri}")
             view_dict.send('insecure-content', True)
 
     def _permission(self, webview: object, request: object, view_dict: dict):
@@ -753,7 +752,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("PERMISSION: {request}".format(request=request))
+        logging.info(f"PERMISSION: {request}")
         request.deny()
         return True
 
@@ -764,9 +763,9 @@ class BrowserProc(object):
 
         for _, regex in self._adblock_filters.items():
             # if regex.search(uri):
-            logging.info('{regex} in {uri}'.format(**locals()))
+            logging.info(f'{regex} in {uri}')
             if re.search(regex, uri):
-                logging.info('AdBlock Blocking: {uri}'.format(**locals()))
+                logging.info(f'AdBlock Blocking: {uri}')
                 return True
 
     def _policy(self, webview: object, decision: object, decision_type: object,
@@ -791,7 +790,7 @@ class BrowserProc(object):
                     return True
 
             if decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
-                logging.debug('NAV ACTION {uri}'.format(**locals()))
+                logging.debug(f'NAV ACTION {uri}')
 
             if nav_action.get_mouse_button() == 2 or \
                     (nav_action.get_mouse_button() == 1 and \
@@ -819,21 +818,21 @@ class BrowserProc(object):
             #         return True
 
             if self._is_ad_match(uri):
-                logging.info('Blocking: {uri}'.format(**locals()))
+                logging.info(f'Blocking: {uri}')
                 decision.ignore()
                 return True
 
             if view_dict.webview.is_loading():
                 # Show a loading status.
-                view_dict.update_status('Request: {uri}...'.format(**locals()))
+                view_dict.update_status(f'Request: {uri}...')
         elif decision_type == WebKit2.PolicyDecisionType.RESPONSE:
             response = decision.get_response()
             http_headers = response.get_http_headers()
             uri = response.get_uri()
-            logging.debug('RESPONSE {uri}'.format(**locals()))
+            logging.debug(f'RESPONSE {uri}')
 
             if self._is_ad_match(uri):
-                logging.info('Blocking: {uri}'.format(**locals()))
+                logging.info(f'Blocking: {uri}')
                 decision.ignore()
                 return True
 
@@ -856,15 +855,15 @@ class BrowserProc(object):
                 return True
 
             if not self._load_scheme(page_uri, uri) and self._private:
-                logging.info("BLOCKING (RESPONSE): {uri}".format(uri=uri))
+                logging.info(f"BLOCKING (RESPONSE): {uri}")
                 decision.ignore()
                 return True
 
             if view_dict.webview.is_loading():
                 # Show a loading status.
-                view_dict.update_status('Response: {uri}...'.format(**locals()))
+                view_dict.update_status(f'Response: {uri}...')
         else:
-            logging.info("UNKNOWN: {decision} {decision_type}".format(**locals()))
+            logging.info(f"UNKNOWN: {decision} {decision_type}")
 
         GLib.idle_add(self._send_back_forward, view_dict)
         decision.use()
@@ -890,7 +889,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("INSECURE CONTENT: {event}".format(**locals()))
+        logging.info(f"INSECURE CONTENT: {event}")
         view_dict.send('insecure-content', True)
 
     def _tls_errors(self, webview: object, uri: str, cert: object,
@@ -899,7 +898,7 @@ class BrowserProc(object):
 
         """
 
-        logging.error("TLS_ERROR {errors} ON {uri} with cert {cert}".format(**locals()))
+        logging.error(f"TLS_ERROR {errors} ON {uri} with cert {cert}")
         view_dict.send('tls-error', True)
         self._verify_view(view_dict)
         return False
@@ -911,7 +910,7 @@ class BrowserProc(object):
 
         uri = webview.get_uri()
         icon = webview.get_favicon()
-        logging.info("ICON: {icon}".format(icon=icon))
+        logging.info(f"ICON: {icon}")
 
         if icon:
             pixbuf = Gdk.pixbuf_get_from_surface(icon, 0, 0,
@@ -933,7 +932,7 @@ class BrowserProc(object):
         if name == 'uri':
             GLib.idle_add(self._send_back_forward, view_dict)
 
-        logging.info("{name}: {value}".format(name=name.upper(), value=value))
+        logging.info(f"{name.upper()}: {value}")
         view_dict.send(name, value)
 
     def _get_source(self, source_object: object, res: object, view_dict: dict):
@@ -966,7 +965,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("Closing: {tmpfile.name}".format(**locals()))
+        logging.info(f"Closing: {tmpfile.name}")
         tmpfile.close()
         self._tmp_files.remove(tmpfile)
 
@@ -1023,7 +1022,7 @@ class BrowserProc(object):
 
         webview = view_dict.webview
         tls_info = webview.get_tls_info()
-        logging.info('CERTIFICATE: {tls_info}'.format(**locals()))
+        logging.info(f'CERTIFICATE: {tls_info}')
         verified, certificate, flags = tls_info
         if certificate:
             issuer_cert = certificate.get_issuer()
@@ -1071,7 +1070,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("LOAD ERROR: {uri} {weberror.message}".format(**locals()))
+        logging.info(f"LOAD ERROR: {uri} {weberror.message}")
         view_dict.send('load-error', {'uri': uri, 'message': weberror.message})
 
     def _mouse_target_changed(self, webview: object, hit_test_result: object,
@@ -1120,7 +1119,7 @@ class BrowserProc(object):
 
         message = response.get_message()
         if message:
-            logging.info("RESOURCE RESPONSE: {flags}".format(flags=message.get_flags()))
+            logging.info(f"RESOURCE RESPONSE: {message.get_flags()}")
 
     def _found_count(self, find_controller: object, match_count: int,
                      view_dict: dict):
@@ -1128,7 +1127,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("FIND_COUNT: {match_count}".format(**locals()))
+        logging.info(f"FIND_COUNT: {match_count}")
 
     def _found_failed(self, find_controller: object, view_dict: dict):
         """ Sends that find failed.
@@ -1143,7 +1142,7 @@ class BrowserProc(object):
 
         """
 
-        logging.info("FOUND: {match_count}".format(**locals()))
+        logging.info(f"FOUND: {match_count}")
         view_dict.send('find-failed', False)
 
     def _button_release(self, webview: object, event: object, view_dict: dict):
