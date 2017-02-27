@@ -43,8 +43,8 @@ def run_main(com_pipe: object, **kwargs):
     """
 
     from socket_process import MainWindow
-    main = MainWindow(com_pipe, **kwargs)
-    main.run()
+    main_window = MainWindow(com_pipe, **kwargs)
+    main_window.run()
 
 
 def main(main_proc: object, main_cpipe: object):
