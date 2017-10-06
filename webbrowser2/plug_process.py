@@ -105,7 +105,7 @@ class BrowserProc(object):
 
         logging.info(f"PRIVATE: {self._private}")
 
-        if webview: return webview.new_with_related_view()
+        if webview: return webview.new_with_related_view(webview)
 
         ctx = WebKit2.WebContext.get_default()
         ctx.set_process_model(WebKit2.ProcessModel.MULTIPLE_SECONDARY_PROCESSES)
