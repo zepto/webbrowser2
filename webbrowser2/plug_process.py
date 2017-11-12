@@ -334,7 +334,7 @@ class BrowserProc(object):
         # Try to make web_view clear up all memory before destroying.
         view_dict.webview.stop_loading()
         view_dict.webview.load_uri('about:blank')
-        view_dict.overlay.remove(view_dict.webview)
+        # view_dict.overlay.remove(view_dict.webview)
 
         # Finally destory the plug.
         view_dict.plug.destroy()
