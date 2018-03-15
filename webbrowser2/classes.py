@@ -585,7 +585,7 @@ class DownloadManager(Gtk.Grid):
                                'Download To')
         if not filename:
             download.cancel()
-            return True
+            return False
 
         logging.info(f'Setting it to {filename}')
         download.set_allow_overwrite(True)
