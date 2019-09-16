@@ -1,4 +1,3 @@
-from path import Path
 from gi import require_version as gi_require_version
 from multiprocessing import Process, Manager, Pipe
 from multiprocessing import current_process

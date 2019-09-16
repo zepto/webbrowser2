@@ -129,6 +129,9 @@ class BrowserProc(object):
         else:
             ctx.set_favicon_database_directory()
 
+        # Set background of webview to white.
+        webview.set_background_color(Gdk.RGBA(1.0, 1.0, 1.0, 1.0))
+
         return webview
 
     def _create_window(self, socket_id: int, com_pipe: object,
