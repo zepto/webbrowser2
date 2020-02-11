@@ -107,7 +107,12 @@ class BrowserProc(object):
 
         if webview: return webview.new_with_related_view(webview)
 
-        ctx = WebKit2.WebContext.get_default()
+        if self._private:
+            ctx = WebKit2.WebContext.new_ephemeral()
+        else:
+            ctx = WebKit2.WebContext.get_default()
+        # ctx.set_sandbox_enabled(True)
+        # logging.info(f'Sandboxed: {ctx.get_sandbox_enabled()}')
         ctx.set_process_model(WebKit2.ProcessModel.MULTIPLE_SECONDARY_PROCESSES)
 
         webview = WebKit2.WebView.new_with_context(ctx)
@@ -125,9 +130,11 @@ class BrowserProc(object):
 
         if self._private:
             ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
-            settings.set_property('enable-private-browsing', True)
+            #settings.set_property('enable-private-browsing', True)
         else:
             ctx.set_favicon_database_directory()
+
+        logging.info(f'Is Ephemeral: {webview.is_ephemeral()}')
 
         # Set background of webview to white.
         webview.set_background_color(Gdk.RGBA(1.0, 1.0, 1.0, 1.0))
@@ -213,7 +220,7 @@ class BrowserProc(object):
                     view_dict),
                 ('resource-load-started', self._resource_started, view_dict),
                 ('context-menu', self._context_menu, view_dict),
-                ('web-process-crashed', self._crashed, view_dict),
+                ('web-process-terminated', self._terminated, view_dict),
                 )
 
         for signal, func, *args in signal_handlers:
@@ -1171,8 +1178,10 @@ class BrowserProc(object):
 
         Gtk.main()
 
-    def _crashed(self, webview: object, view_dict: dict):
+    def _terminated(self, webview: object, reason: object, view_dict: dict):
         """ Handle the crash
+            reason = 0 : Crashed
+                     1 : Exceeded Memory Limit
 
         """
 

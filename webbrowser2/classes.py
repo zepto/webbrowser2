@@ -1168,15 +1168,27 @@ class SettingsManager(Gtk.Grid):
         """
 
         ctx = WebKit2.WebContext.get_default()
+        data_manager = ctx.get_website_data_manager()
 
         if target in ['all', 'cookies']:
             logging.info('Clearing Cookies')
-            ctx.get_cookie_manager().delete_all_cookies()
+            # ctx.get_cookie_manager().delete_all_cookies()
+            data_manager.clear(WebKit2.WebsiteDataTypes.COOKIES, 0, None,
+                               self._clear_callback, None)
         if target in ['all', 'cache']:
             logging.info('Clearing Cache')
             ctx.clear_cache()
+            data_manager.clear(WebKit2.WebsiteDataTypes.ALL, 0, None, 
+                               self._clear_callback, None)
             if ctx.get_favicon_database_directory():
                 ctx.get_favicon_database().clear()
+
+    def _clear_callback(self, data_manager, res, user_data):
+        """ Data Manager clear callback.
+
+        """
+
+        logging.info(f'Cleared: {data_manager.clear_finish(res)}')
 
 
 class ToggleListSettings(Gtk.Grid):
