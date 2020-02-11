@@ -42,7 +42,7 @@ from .functions import looks_like_uri
 from .classes import ChildDict
 
 
-class BrowserProc(object):
+class BrowserProc(Gtk.Application):
     """ A Browser Process.
 
     """
@@ -52,6 +52,12 @@ class BrowserProc(object):
 
 
         """
+
+        # Initialize the gtk application.
+        num = os.getpid()
+        Gtk.Application.__init__(self,
+                                 application_id=f'org.webbrowser2.pid{num}',
+                                 flags=0)
 
         css_provider = Gtk.CssProvider.get_default()
         css_provider.load_from_data(b'''
@@ -92,11 +98,26 @@ class BrowserProc(object):
 
         self._windows = []
 
+
         socket_id, com_pipe = com_dict['socket-id'], com_dict['com-pipe']
         logging.info(f"CREATING: {socket_id} {com_pipe}")
         view_dict = self._create_window(socket_id, com_pipe)
         view_dict.load(com_dict.get('uri', 'about:blank'))
         self._windows.append(view_dict)
+
+    def do_activate(self):
+        """ Add the plug as the application window.
+
+        """
+
+        self.add_window(self._windows[-1]['plug'])
+
+    def do_startup(self):
+        """ Start the gtk application.
+
+        """
+
+        Gtk.Application.do_startup(self)
 
     def _new_webview(self, webview: object = None):
         """ Create a new webview.
@@ -111,8 +132,8 @@ class BrowserProc(object):
             ctx = WebKit2.WebContext.new_ephemeral()
         else:
             ctx = WebKit2.WebContext.get_default()
-        # ctx.set_sandbox_enabled(True)
-        # logging.info(f'Sandboxed: {ctx.get_sandbox_enabled()}')
+        ctx.set_sandbox_enabled(True)
+        logging.info(f'Sandboxed: {ctx.get_sandbox_enabled()}')
         ctx.set_process_model(WebKit2.ProcessModel.MULTIPLE_SECONDARY_PROCESSES)
 
         webview = WebKit2.WebView.new_with_context(ctx)
@@ -364,7 +385,8 @@ class BrowserProc(object):
             for f in self._tmp_files: f.close()
 
             logging.info(f"DESTROYING: {self._pid}")
-            Gtk.main_quit()
+            #Gtk.main_quit()
+            self.quit()
 
         send_dict = {
                 'session': view_dict.session,
@@ -410,6 +432,9 @@ class BrowserProc(object):
         if signal == 'socket-id':
             view_dict['socket-id'] = data
             view_dict['plug'] = self._create_plug(view_dict)
+
+            # Add the new plug as an application window.
+            self.add_window(view_dict['plug'])
 
         if signal == 'stop':
             view_dict['webview'].stop_loading()
@@ -1171,7 +1196,7 @@ class BrowserProc(object):
 
         return False
 
-    def run(self):
+    def _oldrun(self):
         """ Run the main Gtk loop.
 
         """
