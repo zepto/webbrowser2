@@ -157,8 +157,22 @@ class BrowserProc(Gtk.Application):
 
         logging.info(f'Is Ephemeral: {webview.is_ephemeral()}')
 
+        # Set a stylesheet to force the background to white and
+        # foreground to black.
+        style_sheet = """
+                html {
+                        color: black;
+                        background-color: white !important;
+                }
+        """
+        uss = WebKit2.UserStyleSheet(style_sheet,
+                                     WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                                     WebKit2.UserScriptInjectionTime.START,
+                                     None, None)
+        user_content_manager = webview.get_user_content_manager()
+        user_content_manager.add_style_sheet(uss)
         # Set background of webview to white.
-        webview.set_background_color(Gdk.RGBA(1.0, 1.0, 1.0, 1.0))
+        # webview.set_background_color(Gdk.RGBA(1.0, 1.0, 1.0, 1.0))
 
         return webview
 
