@@ -43,6 +43,7 @@ from .functions import looks_like_uri, get_config_path, save_dialog
 from .classes import ChildDict, Profile, SettingsPopover, SearchSettings
 from .classes import SettingsManager, SessionManager, DownloadManager
 from .classes import AgentSettings, AdBlockSettings, MediaFilterSettings
+from .classes import ContentFilterSettings
 from .bookmarks import BookmarkMenu
 
 
@@ -184,11 +185,16 @@ class MainWindow(object):
                                                       self._window)
         self._media_filter_settings.connect('set-active', self._media_filter_set_active)
 
+        self._content_filter_settings = ContentFilterSettings(self._profile.content_filters,
+                                                      self._window)
+        self._content_filter_settings.connect('set-active', self._content_filter_set_active)
+
         self._settings_manager = SettingsManager(self._profile)
         self._settings_manager.add_custom_setting(self._agent_settings)
         self._settings_manager.add_custom_setting(self._search_settings)
         self._settings_manager.add_custom_setting(self._adblock_settings)
         self._settings_manager.add_custom_setting(self._media_filter_settings)
+        self._settings_manager.add_custom_setting(self._content_filter_settings)
         self._settings_manager.show_clear_buttons(True)
         self._settings_manager.connect('setting-changed',
                                        self._settings_changed)
@@ -270,6 +276,7 @@ class MainWindow(object):
                                          index=index, private=private)
 
         init_dict = {
+                'profile-path': self._profile._config_path,
                 'uri': uri,
                 'private': private,
                 'web-view-settings': self._profile.web_view_settings,
@@ -277,6 +284,7 @@ class MainWindow(object):
                 'user-agent': self._agent_settings.get_default(),
                 'adblock-filters': self._profile.adblock,
                 'media-filters': self._profile.media_filters,
+                'content-filters': self._profile.content_filters,
                 'com-pipe': child_pipe,
                 'socket-id': socket_id,
                 }
@@ -336,7 +344,7 @@ class MainWindow(object):
     @save_config
     def _adblock_set_active(self, adblock_settings: object, name: str,
                             data: str, active: bool):
-        """ Set the default search engine.
+        """ Change adblock.
 
         """
 
@@ -350,6 +358,15 @@ class MainWindow(object):
         """
 
         self._send_all('media-filter', (name, data, active))
+
+    @save_config
+    def _content_filter_set_active(self, adblock_settings: object, name: str,
+                            data: str, active: bool):
+        """ Set the default content filter.
+
+        """
+
+        self._send_all('content-filter', (name, data, active))
 
     @save_config
     def _size_allocate(self, window: object, allocation: object):

@@ -53,12 +53,6 @@ class BrowserProc(Gtk.Application):
 
         """
 
-        # Initialize the gtk application.
-        num = os.getpid()
-        Gtk.Application.__init__(self,
-                                 application_id=f'org.webbrowser2.pid{num}',
-                                 flags=0)
-
         css_provider = Gtk.CssProvider.get_default()
         css_provider.load_from_data(b'''
                 .status {
@@ -94,9 +88,18 @@ class BrowserProc(Gtk.Application):
             if active:
                 self._media_filters[name] = re.compile(regex)
 
+        self._content_filters = com_dict.get('content-filters', {})
+
         self._pid = current_process().pid
 
         self._windows = []
+
+        self._config_path = com_dict['profile-path']
+
+        # Initialize the gtk application.
+        Gtk.Application.__init__(self,
+                                 application_id=f'org.webbrowser2.pid{self._pid}',
+                                 flags=0)
 
 
         socket_id, com_pipe = com_dict['socket-id'], com_dict['com-pipe']
@@ -157,24 +160,85 @@ class BrowserProc(Gtk.Application):
 
         logging.info(f'Is Ephemeral: {webview.is_ephemeral()}')
 
-        # Set a stylesheet to force the background to white and
-        # foreground to black.
-        style_sheet = """
-                html {
-                        color: black;
-                        background-color: white !important;
-                }
-        """
+        # Load user-stylesheet and apply it to the webview.
+        css_file = self._config_path.joinpath('user-stylesheet.css')
+        style_sheet = css_file.read_text() if css_file.is_file() else ''
+
         uss = WebKit2.UserStyleSheet(style_sheet,
                                      WebKit2.UserContentInjectedFrames.ALL_FRAMES,
                                      WebKit2.UserScriptInjectionTime.START,
                                      None, None)
-        user_content_manager = webview.get_user_content_manager()
-        user_content_manager.add_style_sheet(uss)
+        webview.get_user_content_manager().add_style_sheet(uss)
+
+
+        # Apply content filters to the new webview
+        self._apply_content_filters(webview)
+
         # Set background of webview to white.
         # webview.set_background_color(Gdk.RGBA(1.0, 1.0, 1.0, 1.0))
 
         return webview
+
+    def _apply_content_filters(self, webview: object):
+        """ Apply all content filters in self._content_filters to webview.
+
+        """
+
+        if not self._content_filters: return
+
+        user_content_manager = webview.get_user_content_manager()
+
+        content_filter_store = WebKit2.UserContentFilterStore.new(str(self._config_path))
+
+        content_filter_store.fetch_identifiers(None,
+                                               self._filter_fetch_callback,
+                                               user_content_manager)
+
+    def _filter_fetch_callback(self, content_filter_store: object,
+                               result: object, user_content_manager: object):
+        """ Finishes fetching the content filter and adds it to the content
+        manager.
+
+        """
+
+        id_list = content_filter_store.fetch_identifiers_finish(result)
+
+        for filter_id, (uri, active) in self._content_filters.items():
+            logging.info(f"{filter_id=}, {uri=}, {active=}")
+            if not active:
+                user_content_manager.remove_filter_by_id(filter_id)
+                continue
+            if filter_id in id_list:
+                content_filter_store.load(filter_id, None,
+                                            self._filter_load_callback,
+                                            user_content_manager)
+                continue
+
+            filter_file = Gio.File.new_for_uri(uri)
+            content_filter_store.save_from_file(filter_id, filter_file, None,
+                                                self._filter_save_callback,
+                                                user_content_manager)
+
+    def _filter_load_callback(self, content_filter_store: object,
+                              result: object, user_content_manager: object):
+        """ Finishes loading the content filter and adds it to the content
+        manager.
+
+        """
+
+        content_filter = content_filter_store.load_finish(result)
+        if content_filter:
+            user_content_manager.add_filter(content_filter)
+
+    def _filter_save_callback(self, content_filter_store: object,
+                              result: object, user_content_manager: object):
+        """ Finishes saving the content filter.
+
+        """
+
+        content_filter = content_filter_store.save_finish(result)
+        if content_filter:
+            user_content_manager.add_filter(content_filter)
 
     def _create_window(self, socket_id: int, com_pipe: object,
                        webview: object = None):
@@ -516,6 +580,12 @@ class BrowserProc(Gtk.Application):
                 self._media_filters[name] = re.compile(regex)
             else:
                 self._media_filters.pop(name, None)
+
+        if signal == 'content-filter':
+            name, uri, active = data
+            self._content_filters[name] = (uri, active)
+            for window in self._windows:
+                self._apply_content_filters(window.webview)
 
         return True
 

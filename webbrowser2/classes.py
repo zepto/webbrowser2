@@ -170,6 +170,10 @@ class Profile(dict):
                 self[key] = {
                         'Chromium': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36',
                         }
+            elif key == 'content-filters':
+                self[key] = {
+                        'blocker list': ('https://better.fyi/blockerList.json', True),
+                        }
             elif key == 'default-user-agent':
                 self[key] = 'Chromium'
             elif key == 'find-str':
@@ -1738,12 +1742,12 @@ class AdBlockSettings(CheckListSettings):
 
 
 class MediaFilterSettings(CheckListSettings):
-    """ AdBlock settings.
+    """ Media filter settings.
 
     """
 
     def __init__(self, filter_dict: dict, parent: object = None):
-        """ Create a list for configuring adblock.
+        """ Create a list for configuring media filters.
 
         """
 
@@ -1760,5 +1764,32 @@ class MediaFilterSettings(CheckListSettings):
         self._edit_title = 'Edit Filter'
         self._edit_name_title = 'Edit Name'
         self._edit_data_title = 'Edit Regex'
+
+        super().__init__(filter_dict, parent)
+
+
+class ContentFilterSettings(CheckListSettings):
+    """ Content Filter settings.
+
+    """
+
+    def __init__(self, filter_dict: dict, parent: object = None):
+        """ Create a list for configuring content filter files.
+
+        """
+
+        # Change these.
+        self._add_tooltip = 'Add New Filter'
+        self._edit_tooltip = 'Edit Filter'
+        self._remove_tooltip = 'Remove Filter'
+        self._frame_text = 'Content Filter Settings'
+
+        self._add_title = 'Add Filter'
+        self._add_name_title = 'Enter Name'
+        self._add_data_title = 'Enter URI'
+
+        self._edit_title = 'Edit Filter'
+        self._edit_name_title = 'Edit Name'
+        self._edit_data_title = 'Edit URI'
 
         super().__init__(filter_dict, parent)
