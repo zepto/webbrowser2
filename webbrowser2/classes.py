@@ -1691,6 +1691,9 @@ class CheckListSettings(Gtk.Grid):
             # Operation canceld so do nothing.
             self._options_dict[name] = (data, active)
         else:
+            # Remove old item.
+            self.emit('removed', name, data)
+
             new_name = result['name']
             self._options_dict[result['name']] = (result['uri'], active)
             check_button.set_label(result['name'])
@@ -1698,8 +1701,6 @@ class CheckListSettings(Gtk.Grid):
             self.emit('set-active', name, result['uri'], False)
             # Activate new.
             self.emit('set-active', new_name, *self._options_dict[new_name])
-            # Remove old item.
-            self.emit('removed', name, data)
 
     def get_all(self):
         """ Return the dict of options engines.
