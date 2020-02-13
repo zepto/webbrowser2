@@ -266,6 +266,7 @@ class MainWindow(object):
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
                           self._handle_extern_signal)
 
+        self._cancellable = Gio.Cancellable.new()
         config_path = self._profile._config_path
         filter_path = str(config_path.joinpath('content filters'))
         self._content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
@@ -373,7 +374,7 @@ class MainWindow(object):
 
         """
 
-        self._content_filter_store.remove(filter_id, None,
+        self._content_filter_store.remove(filter_id, self._cancellable,
                                           self._filter_remove_callback,
                                           filter_id)
 
@@ -396,7 +397,7 @@ class MainWindow(object):
 
         filter_tuple = (name, data, active) if name else None
 
-        self._content_filter_store.fetch_identifiers(None,
+        self._content_filter_store.fetch_identifiers(self._cancellable,
                                                      self._filter_fetch_callback,
                                                      filter_tuple)
 
@@ -436,7 +437,8 @@ class MainWindow(object):
             uri = uri_file.as_uri()
 
         filter_file = Gio.File.new_for_uri(uri)
-        content_filter_store.save_from_file(filter_id, filter_file, None,
+        content_filter_store.save_from_file(filter_id, filter_file,
+                                            self._cancellable,
                                             self._filter_save_callback,
                                             filter_tuple)
 
@@ -535,6 +537,9 @@ class MainWindow(object):
             self._profile.crash_file.unlink()
 
         self._download_manager.cancel_all()
+
+        # Cancel all gio async functions.
+        self._cancellable.cancel()
 
         Gtk.main_quit()
         self._send('quit', True)
