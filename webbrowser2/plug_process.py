@@ -205,7 +205,7 @@ class BrowserProc(Gtk.Application):
         id_list = content_filter_store.fetch_identifiers_finish(result)
 
         for filter_id, (uri, active) in self._content_filters.items():
-            logging.info(f"{filter_id=}, {uri=}, {active=}")
+            logging.info(f"PLUG: {filter_id=}, {uri=}, {active=}")
             if not active:
                 user_content_manager.remove_filter_by_id(filter_id)
                 continue
@@ -213,13 +213,6 @@ class BrowserProc(Gtk.Application):
                 content_filter_store.load(filter_id, None,
                                           self._filter_load_callback,
                                           user_content_manager)
-                continue
-            if (uri_file := self._config_path.joinpath(uri)).is_file():
-                uri = uri_file.as_uri()
-            filter_file = Gio.File.new_for_uri(uri)
-            content_filter_store.save_from_file(filter_id, filter_file, None,
-                                                self._filter_save_callback,
-                                                user_content_manager)
 
     def _filter_load_callback(self, content_filter_store: object,
                               result: object, user_content_manager: object):
@@ -229,16 +222,6 @@ class BrowserProc(Gtk.Application):
         """
 
         content_filter = content_filter_store.load_finish(result)
-        if content_filter:
-            user_content_manager.add_filter(content_filter)
-
-    def _filter_save_callback(self, content_filter_store: object,
-                              result: object, user_content_manager: object):
-        """ Finishes saving the content filter.
-
-        """
-
-        content_filter = content_filter_store.save_finish(result)
         if content_filter:
             user_content_manager.add_filter(content_filter)
 

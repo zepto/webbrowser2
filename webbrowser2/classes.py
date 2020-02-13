@@ -32,8 +32,8 @@ import socket
 from json import loads as json_loads
 from json import dumps as json_dumps
 
-from .functions import save_dialog
-from .bookmarks import EntryDialog
+from functions import save_dialog
+from bookmarks import EntryDialog
 
 class ChildDict(dict):
     """ A dictionary that has a send command.
@@ -172,7 +172,7 @@ class Profile(dict):
                         }
             elif key == 'content-filters':
                 self[key] = {
-                        'blocker list': ('https://better.fyi/blockerList.json', True),
+                        'easylist_min': ('https://easylist-downloads.adblockplus.org/easylist_min_content_blocker.json', True),
                         }
             elif key == 'default-user-agent':
                 self[key] = 'Chromium'

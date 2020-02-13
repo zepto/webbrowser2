@@ -351,22 +351,60 @@ class MainWindow(object):
         self._send_all('adblock', (name, data, active))
 
     @save_config
-    def _media_filter_set_active(self, adblock_settings: object, name: str,
-                            data: str, active: bool):
-        """ Set the default search engine.
+    def _media_filter_set_active(self, media_filter_settings: object,
+                                 name: str, data: str, active: bool):
+        """ Send media filter settings.
 
         """
 
         self._send_all('media-filter', (name, data, active))
 
     @save_config
-    def _content_filter_set_active(self, adblock_settings: object, name: str,
-                            data: str, active: bool):
-        """ Set the default content filter.
+    def _content_filter_set_active(self, content_filter_settings: object,
+                                   name: str, data: str, active: bool):
+        """ Send the content filter.
 
         """
 
-        self._send_all('content-filter', (name, data, active))
+        config_path = self._profile._config_path
+        filter_path = str(config_path.joinpath('content filters'))
+        content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
+
+        content_filter_store.fetch_identifiers(None,
+                                               self._filter_fetch_callback,
+                                               (name, data, active))
+
+    def _filter_fetch_callback(self, content_filter_store: object,
+                               result: object, filter_tuple: tuple):
+        """ Finishes fetching the content filter and adds it to the content
+        manager.
+
+        """
+
+        filter_id, uri, active = filter_tuple
+        logging.info(f"SOCKET: {filter_id=}, {uri=}, {active=}")
+
+        id_list = content_filter_store.fetch_identifiers_finish(result)
+
+        if filter_id in id_list or not active:
+            self._send_all('content-filter', (filter_id, uri, active))
+        else:
+            if (uri_file := self._profile._config_path.joinpath(uri)).is_file():
+                uri = uri_file.as_uri()
+            filter_file = Gio.File.new_for_uri(uri)
+            content_filter_store.save_from_file(filter_id, filter_file, None,
+                                                self._filter_save_callback,
+                                                filter_tuple)
+
+    def _filter_save_callback(self, content_filter_store: object,
+                              result: object, filter_tuple: tuple):
+        """ Finishes saving the content filter.
+
+        """
+
+        content_filter = content_filter_store.save_finish(result)
+        if content_filter:
+            self._send_all('content-filter', filter_tuple)
 
     @save_config
     def _size_allocate(self, window: object, allocation: object):
