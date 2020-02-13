@@ -265,6 +265,9 @@ class MainWindow(object):
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
                           self._handle_extern_signal)
 
+        # Save any not saved content filters.
+        self._content_filter_set_active(self._content_filter_settings)
+
     def _make_tab(self, uri: str = 'about:blank', focus: bool = False,
                   private: bool = True, index: int = -1):
         """ Make a tab.
@@ -361,7 +364,8 @@ class MainWindow(object):
 
     @save_config
     def _content_filter_set_active(self, content_filter_settings: object,
-                                   name: str, data: str, active: bool):
+                                   name: str = None, data: str = None,
+                                   active: bool = False):
         """ Send the content filter.
 
         """
@@ -370,9 +374,11 @@ class MainWindow(object):
         filter_path = str(config_path.joinpath('content filters'))
         content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
 
+        filter_tuple = (name, data, active) if name else None
+
         content_filter_store.fetch_identifiers(None,
                                                self._filter_fetch_callback,
-                                               (name, data, active))
+                                               filter_tuple)
 
     def _filter_fetch_callback(self, content_filter_store: object,
                                result: object, filter_tuple: tuple):
@@ -381,20 +387,39 @@ class MainWindow(object):
 
         """
 
-        filter_id, uri, active = filter_tuple
-        logging.info(f"SOCKET: {filter_id=}, {uri=}, {active=}")
-
         id_list = content_filter_store.fetch_identifiers_finish(result)
 
-        if filter_id in id_list or not active:
-            self._send_all('content-filter', (filter_id, uri, active))
+
+        if filter_tuple:
+            filter_id, uri, active = filter_tuple
+            logging.info(f"SOCKET: {filter_id=}, {uri=}, {active=}")
+
+            if filter_id in id_list or not active:
+                self._send_all('content-filter', filter_tuple)
+            else:
+                self._save_filter(content_filter_store, filter_tuple)
         else:
-            if (uri_file := self._profile._config_path.joinpath(uri)).is_file():
-                uri = uri_file.as_uri()
-            filter_file = Gio.File.new_for_uri(uri)
-            content_filter_store.save_from_file(filter_id, filter_file, None,
-                                                self._filter_save_callback,
-                                                filter_tuple)
+            for filter_id, (uri, active) in self._profile.content_filters.items():
+                logging.info(f"SOCKET: {filter_id=}, {uri=}, {active=}")
+
+                if filter_id not in id_list and active:
+                    self._save_filter(content_filter_store,
+                                      (filter_id, uri, active))
+
+    def _save_filter(self, content_filter_store: object, filter_tuple: tuple):
+        """ Save the filter.
+
+        """
+
+        filter_id, uri, active = filter_tuple
+
+        if (uri_file := self._profile._config_path.joinpath(uri)).is_file():
+            uri = uri_file.as_uri()
+
+        filter_file = Gio.File.new_for_uri(uri)
+        content_filter_store.save_from_file(filter_id, filter_file, None,
+                                            self._filter_save_callback,
+                                            filter_tuple)
 
     def _filter_save_callback(self, content_filter_store: object,
                               result: object, filter_tuple: tuple):
@@ -402,8 +427,7 @@ class MainWindow(object):
 
         """
 
-        content_filter = content_filter_store.save_finish(result)
-        if content_filter:
+        if content_filter_store.save_finish(result):
             self._send_all('content-filter', filter_tuple)
 
     @save_config
