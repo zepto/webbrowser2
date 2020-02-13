@@ -188,7 +188,8 @@ class BrowserProc(Gtk.Application):
 
         user_content_manager = webview.get_user_content_manager()
 
-        content_filter_store = WebKit2.UserContentFilterStore.new(str(self._config_path))
+        filter_path = str(self._config_path.joinpath('content filters'))
+        content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
 
         content_filter_store.fetch_identifiers(None,
                                                self._filter_fetch_callback,
@@ -210,10 +211,11 @@ class BrowserProc(Gtk.Application):
                 continue
             if filter_id in id_list:
                 content_filter_store.load(filter_id, None,
-                                            self._filter_load_callback,
-                                            user_content_manager)
+                                          self._filter_load_callback,
+                                          user_content_manager)
                 continue
-
+            if (uri_file := self._config_path.joinpath(uri)).is_file():
+                uri = uri_file.as_uri()
             filter_file = Gio.File.new_for_uri(uri)
             content_filter_store.save_from_file(filter_id, filter_file, None,
                                                 self._filter_save_callback,
