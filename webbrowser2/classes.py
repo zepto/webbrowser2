@@ -1670,6 +1670,7 @@ class CheckListSettings(Gtk.Grid):
         self._options_list.remove(grid.get_parent())
 
         self.emit('set-active', name, data, False)
+        self.emit('removed', name, data)
 
     def _edit_clicked(self, button: object, check_button: object):
         """ Remove this option from the list.

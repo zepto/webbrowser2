@@ -188,6 +188,7 @@ class MainWindow(object):
         self._content_filter_settings = ContentFilterSettings(self._profile.content_filters,
                                                       self._window)
         self._content_filter_settings.connect('set-active', self._content_filter_set_active)
+        self._content_filter_settings.connect('removed', self._content_filter_removed)
 
         self._settings_manager = SettingsManager(self._profile)
         self._settings_manager.add_custom_setting(self._agent_settings)
@@ -264,6 +265,10 @@ class MainWindow(object):
 
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
                           self._handle_extern_signal)
+
+        config_path = self._profile._config_path
+        filter_path = str(config_path.joinpath('content filters'))
+        self._content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
 
         # Save any not saved content filters.
         self._content_filter_set_active(self._content_filter_settings)
@@ -362,6 +367,25 @@ class MainWindow(object):
 
         self._send_all('media-filter', (name, data, active))
 
+    def _content_filter_removed(self, content_filter_settings: object,
+                                filter_id: str, uri: str):
+        """ Remove content filter.
+
+        """
+
+        self._content_filter_store.remove(filter_id, None,
+                                          self._filter_remove_callback,
+                                          filter_id)
+
+    def _filter_remove_callback(self, content_filter_store: object,
+                                result: object, filter_id: str):
+        """ Finishes removing the content filter.
+
+        """
+
+        removed = content_filter_store.remove_finish(result)
+        logging.info(f'SOCKET: Filter "{filter_id}" Removed: {removed}')
+
     @save_config
     def _content_filter_set_active(self, content_filter_settings: object,
                                    name: str = None, data: str = None,
@@ -370,15 +394,11 @@ class MainWindow(object):
 
         """
 
-        config_path = self._profile._config_path
-        filter_path = str(config_path.joinpath('content filters'))
-        content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
-
         filter_tuple = (name, data, active) if name else None
 
-        content_filter_store.fetch_identifiers(None,
-                                               self._filter_fetch_callback,
-                                               filter_tuple)
+        self._content_filter_store.fetch_identifiers(None,
+                                                     self._filter_fetch_callback,
+                                                     filter_tuple)
 
     def _filter_fetch_callback(self, content_filter_store: object,
                                result: object, filter_tuple: tuple):
@@ -388,7 +408,6 @@ class MainWindow(object):
         """
 
         id_list = content_filter_store.fetch_identifiers_finish(result)
-
 
         if filter_tuple:
             filter_id, uri, active = filter_tuple
