@@ -562,7 +562,7 @@ class BrowserProc(Gtk.Application):
 
         if signal == 'web-view-settings':
             settings = view_dict.webview.get_settings()
-            self._set_webview_property(*data)
+            self._set_webview_property(settings, *data)
 
         if signal == 'default-search':
             self._search_url = data
@@ -852,8 +852,8 @@ class BrowserProc(Gtk.Application):
         byline = "" if byline == 'null' else byline
         content = reader_js_value.object_get_property('content').to_string()
         title = reader_js_value.object_get_property('title').to_string()
-        font_style = 'Serif'
-        color_scheme = 'Light'
+        font_style = 'sans'
+        color_scheme = 'light'
         html = f"""
                 <style>{self._reader_css}</style>
                 <title>{title}</title>

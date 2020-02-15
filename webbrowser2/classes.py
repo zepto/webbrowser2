@@ -126,6 +126,7 @@ class Profile(dict):
                         'enable-plugins': False,
                         'enable-mediasource': True,
                         'enable-javascript': True,
+                        'enable-javascript-markup': True,
                         'enable-webaudio': True,
                         'enable-webgl': True,
                         'enable-accelerated-2d-canvas': True,
@@ -149,6 +150,12 @@ class Profile(dict):
                         'media-playback-requires-user-gesture': False,
                         'print-backgrounds': True,
                         'zoom-text-only': False,
+                        'default-font-family': 'sans-serif',
+                        'default-font-size': 16,
+                        'serif-font-family': 'Serif 10',
+                        'sans-serif-font-family': 'Sans 10',
+                        'monospace-font-family': 'Monospace 10',
+                        'enable-media': True,
                         }
             elif key == 'adblock':
                 self[key] = {
@@ -1084,6 +1091,8 @@ class SettingsManager(Gtk.Grid):
                 self.add_str_setting(setting, value)
             elif type(value) == bool:
                 self.add_bool_setting(setting, value)
+            elif type(value) == int:
+                self.add_int_setting(setting, value)
 
     def add_bool_setting(self, setting: str, value: bool, title: str = '',
                          tooltip: str = ''):
@@ -1113,7 +1122,7 @@ class SettingsManager(Gtk.Grid):
         self._settings_grid.attach_next_to(grid, None, Gtk.PositionType.BOTTOM,
                                            1, 1)
 
-    def add_str_setting(self, setting: str, value: bool, title: str = '',
+    def add_str_setting(self, setting: str, value: str, title: str = '',
                         tooltip: str = ''):
         """ Show the user agent setting.
 
@@ -1141,14 +1150,52 @@ class SettingsManager(Gtk.Grid):
         apply_button.set_margin_bottom(3)
         apply_button.set_tooltip_text('Apply')
         apply_button.set_image(button_img)
-        apply_button.connect('clicked',
-                            lambda btn: self.emit('setting-changed',
-                                                  setting, value))
+        apply_button.connect('clicked', self._setting_changed,
+                            entry.get_text, setting)
 
         grid = Gtk.Grid()
         grid.get_style_context().add_class('linked')
         grid.attach(entry, 0, 0, 1, 1)
         grid.attach(apply_button, 1, 0, 1, 1)
+
+        frame_label = Gtk.Label(f'<b>{title}</b>')
+        frame_label.set_use_markup(True)
+
+        frame = Gtk.Frame()
+        frame.set_margin_start(3)
+        frame.set_label_widget(frame_label)
+        frame.add(grid)
+        frame.set_shadow_type(Gtk.ShadowType.NONE)
+        frame.show_all()
+
+        self._settings_grid.attach_next_to(frame, None,
+                                           Gtk.PositionType.BOTTOM, 1, 1)
+
+    def add_int_setting(self, setting: str, value: int, title: str = '',
+                        tooltip: str = ''):
+        """ Show the user agent setting.
+
+        """
+
+        if not title:
+            title = setting.replace('-', ' ', setting.count('-')).title()
+        if not tooltip:
+            tooltip = title
+
+        adjustment = Gtk.Adjustment(value, 0, 100, 1, 0, 0)
+        spin_button = Gtk.SpinButton.new(adjustment, 1, 0)
+        spin_button.set_tooltip_text(tooltip)
+        spin_button.set_margin_start(3)
+        spin_button.set_margin_top(3)
+        spin_button.set_margin_bottom(3)
+        spin_button.set_hexpand(True)
+        spin_button.set_value(value)
+        spin_button.connect('value-changed', self._setting_changed,
+                            spin_button.get_value_as_int, setting)
+
+        grid = Gtk.Grid()
+        grid.get_style_context().add_class('linked')
+        grid.attach(spin_button, 0, 0, 1, 1)
 
         frame_label = Gtk.Label(f'<b>{title}</b>')
         frame_label.set_use_markup(True)
@@ -1170,6 +1217,15 @@ class SettingsManager(Gtk.Grid):
 
         self._settings_grid.attach_next_to(widget, None,
                                            Gtk.PositionType.BOTTOM, 1, 1)
+
+    def _setting_changed(self, widget: object, get_value: object, setting: str):
+        """ Send the setting value and save it.
+
+        """
+
+        value = get_value()
+        self._profile.web_view_settings[setting] = value
+        self.emit('setting-changed', setting, value)
 
     def _switch_active(self, switch: object, prop: object, setting: str):
         """ Send the switch value.
