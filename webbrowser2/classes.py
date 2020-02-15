@@ -182,6 +182,8 @@ class Profile(dict):
                 self[key] = True
             elif key == 'hide-address-bar':
                 self[key] = False
+            elif key == 'enable-user-stylesheet':
+                self[key] = False
             return super(Profile, self).__getitem__(key)
 
     def __getattr__(self, item: str):
@@ -264,6 +266,21 @@ class Profile(dict):
 
         self._socket.close()
         self._socket_file.unlink()
+
+    def get_file(self, target: str) -> str:
+        """ Return the target file text or path string or ''.
+
+        """
+
+        if target == 'content-filters':
+            return str(self._config_path.joinpath('content filters'))
+
+        target_file = self._config_path.joinpath(target)
+        if target_file.is_file():
+            return target_file.read_text()
+        else:
+            return ''
+    get_path = get_file
 
 
 class SettingsPopover(Gtk.Popover):
@@ -372,6 +389,12 @@ class DownloadManager(Gtk.Grid):
 
         """
 
+        if not start:
+            # If download is just added for the uri do not add
+            # duplicates.
+            for list_box_row in self._download_list.get_children():
+                if uri == list_box_row.get_children()[0].uri: return
+
         progress_bar = Gtk.ProgressBar()
         progress_bar.set_margin_start(3)
         progress_bar.set_margin_end(12)
@@ -451,6 +474,7 @@ class DownloadManager(Gtk.Grid):
         download_stack.add_named(finish_grid, 'finish')
         download_stack.set_visible_child_name('download')
         download_stack.show_all()
+        download_stack.uri = uri
 
         self._download_list.add(download_stack)
 
@@ -1044,6 +1068,10 @@ class SettingsManager(Gtk.Grid):
         self.add_bool_setting('clear-on-exit', self._profile.clear_on_exit,
                               'Clear All Data On Exit',
                               'Clear cache, site database, and cookies on exit.')
+        self.add_bool_setting('enable-user-stylesheet',
+                               self._profile.enable_user_stylesheet,
+                              'Use User Stylesheet',
+                              'Apply the user-stylesheet.css to every webpage.')
         self.add_settings(self._profile.web_view_settings)
 
     def add_settings(self, settings: dict):
@@ -1154,6 +1182,9 @@ class SettingsManager(Gtk.Grid):
             self._profile.clear_on_exit = active
         elif setting == 'hide-address-bar':
             self._profile.hide_address_bar = active
+            self.emit('setting-changed', setting, active)
+        elif setting == 'enable-user-stylesheet':
+            self._profile.enable_user_stylesheet = active
             self.emit('setting-changed', setting, active)
         else:
             self._profile.web_view_settings[setting] = active

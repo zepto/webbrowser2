@@ -105,7 +105,8 @@ class MainWindow(object):
                 }
                ''')
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(),
-                css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                                                 css_provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         self._accels = Gtk.AccelGroup()
 
@@ -182,13 +183,16 @@ class MainWindow(object):
         self._adblock_settings.connect('set-active', self._adblock_set_active)
 
         self._media_filter_settings = MediaFilterSettings(self._profile.media_filters,
-                                                      self._window)
-        self._media_filter_settings.connect('set-active', self._media_filter_set_active)
+                                                          self._window)
+        self._media_filter_settings.connect('set-active',
+                                            self._media_filter_set_active)
 
         self._content_filter_settings = ContentFilterSettings(self._profile.content_filters,
                                                       self._window)
-        self._content_filter_settings.connect('set-active', self._content_filter_set_active)
-        self._content_filter_settings.connect('removed', self._content_filter_removed)
+        self._content_filter_settings.connect('set-active',
+                                              self._content_filter_set_active)
+        self._content_filter_settings.connect('removed',
+                                              self._content_filter_removed)
 
         self._settings_manager = SettingsManager(self._profile)
         self._settings_manager.add_custom_setting(self._agent_settings)
@@ -254,6 +258,18 @@ class MainWindow(object):
 
         self._recv = self._pipe.recv
 
+        self._cancellable = Gio.Cancellable.new()
+
+        self._user_stylesheet = self._profile.get_file('user-stylesheet.css')
+        self._reader_js = self._profile.get_file('Readability.js')
+        self._reader_css = self._profile.get_file('reader.css')
+
+        filter_path = self._profile.get_path('content-filters')
+        self._content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
+
+        # Save any not saved content filters.
+        self._content_filter_set_active(self._content_filter_settings)
+
         GLib.io_add_watch(self._pipe.fileno(), GLib.IO_IN, self._recieve)
 
         # Recover the previous session.
@@ -265,14 +281,6 @@ class MainWindow(object):
 
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
                           self._handle_extern_signal)
-
-        self._cancellable = Gio.Cancellable.new()
-        config_path = self._profile._config_path
-        filter_path = str(config_path.joinpath('content filters'))
-        self._content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
-
-        # Save any not saved content filters.
-        self._content_filter_set_active(self._content_filter_settings)
 
     def _make_tab(self, uri: str = 'about:blank', focus: bool = False,
                   private: bool = True, index: int = -1):
@@ -294,8 +302,13 @@ class MainWindow(object):
                 'adblock-filters': self._profile.adblock,
                 'media-filters': self._profile.media_filters,
                 'content-filters': self._profile.content_filters,
+                'content-filters-path': self._profile.get_path('content-filters'),
                 'com-pipe': child_pipe,
                 'socket-id': socket_id,
+                'reader-js': self._reader_js,
+                'reader-css': self._reader_css,
+                'user-stylesheet': self._user_stylesheet,
+                'enable-user-stylesheet': self._profile.enable_user_stylesheet,
                 }
 
         return init_dict, child
@@ -331,6 +344,8 @@ class MainWindow(object):
                 else:
                     child.overlay.remove(child.address_bar)
                     child.tab_grid.attach(child.address_bar, 0, 0, 1, 1)
+        elif setting == 'enable-user-stylesheet':
+            self._send_all('enable-user-stylesheet', value)
         else:
             self._send_all('web-view-settings', (setting, value))
 

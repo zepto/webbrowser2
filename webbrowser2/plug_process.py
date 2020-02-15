@@ -90,11 +90,17 @@ class BrowserProc(Gtk.Application):
 
         self._content_filters = com_dict.get('content-filters', {})
 
+        self._enable_user_stylesheet = com_dict.get('enable-user-stylesheet',
+                                                    False)
+
         self._pid = current_process().pid
 
         self._windows = []
 
-        self._config_path = com_dict['profile-path']
+        self._filter_path = com_dict['content-filters-path']
+        self._reader_js = com_dict['reader-js']
+        self._reader_css = com_dict['reader-css']
+        self._user_stylesheet = com_dict['user-stylesheet']
 
         # Initialize the gtk application.
         Gtk.Application.__init__(self,
@@ -147,37 +153,50 @@ class BrowserProc(Gtk.Application):
         settings = webview.get_settings()
         for prop, value in self._web_view_settings.items():
             logging.info(f"setting: {prop} => {value}")
-            try:
-                settings.set_property(prop, value)
-            except TypeError as err:
-                logging.error(err)
+            self._set_webview_property(settings, prop, value)
 
         if self._private:
             ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
-            #settings.set_property('enable-private-browsing', True)
         else:
             ctx.set_favicon_database_directory()
 
         logging.info(f'Is Ephemeral: {webview.is_ephemeral()}')
 
-        # Load user-stylesheet and apply it to the webview.
-        css_file = self._config_path.joinpath('user-stylesheet.css')
-        style_sheet = css_file.read_text() if css_file.is_file() else ''
-
-        uss = WebKit2.UserStyleSheet(style_sheet,
-                                     WebKit2.UserContentInjectedFrames.ALL_FRAMES,
-                                     WebKit2.UserScriptInjectionTime.START,
-                                     None, None)
-        webview.get_user_content_manager().add_style_sheet(uss)
-
+        self._toggle_user_stylesheet(webview, self._enable_user_stylesheet)
 
         # Apply content filters to the new webview
         self._apply_content_filters(webview)
 
-        # Set background of webview to white.
-        # webview.set_background_color(Gdk.RGBA(1.0, 1.0, 1.0, 1.0))
-
         return webview
+
+    def _toggle_user_stylesheet(self, webview: object, enable: bool):
+        """ Add/Remove the user stylesheet from webview.
+
+        """
+
+        content_manager = webview.get_user_content_manager()
+
+        if not enable:
+            logging.info(f'Removing all stylesheets')
+            content_manager.remove_all_style_sheets()
+        else:
+            logging.info(f'Adding stylesheet {self._user_stylesheet}')
+            uss = WebKit2.UserStyleSheet(self._user_stylesheet,
+                                         WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                                         WebKit2.UserScriptInjectionTime.START,
+                                         None, None)
+            content_manager.add_style_sheet(uss)
+
+    def _set_webview_property(self, webview_settings: object, prop: str,
+                              value: object):
+        """ Set property to value in webview_settings.
+
+        """
+
+        try:
+            webview_settings.set_property(prop, value)
+        except TypeError as err:
+            logging.error(err)
 
     def _apply_content_filters(self, webview: object):
         """ Apply all content filters in self._content_filters to webview.
@@ -188,8 +207,7 @@ class BrowserProc(Gtk.Application):
 
         user_content_manager = webview.get_user_content_manager()
 
-        filter_path = str(self._config_path.joinpath('content filters'))
-        content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
+        content_filter_store = WebKit2.UserContentFilterStore.new(self._filter_path)
 
         content_filter_store.fetch_identifiers(None,
                                                self._filter_fetch_callback,
@@ -276,6 +294,7 @@ class BrowserProc(Gtk.Application):
             'is-blank-page': lambda: self._is_blank(view_dict),
             'webview-sig-ids': [],
             'session': b'',
+            'reader-mode': False,
             })
 
         if socket_id: view_dict['plug'] = self._create_plug(view_dict)
@@ -543,10 +562,7 @@ class BrowserProc(Gtk.Application):
 
         if signal == 'web-view-settings':
             settings = view_dict.webview.get_settings()
-            try:
-                settings.set_property(*data)
-            except TypeError as err:
-                logging.error(err)
+            self._set_webview_property(*data)
 
         if signal == 'default-search':
             self._search_url = data
@@ -571,6 +587,15 @@ class BrowserProc(Gtk.Application):
             self._content_filters[name] = (uri, active)
             for window in self._windows:
                 self._apply_content_filters(window.webview)
+
+        if signal == 'enable-user-stylesheet':
+            print(signal, data)
+            for window in self._windows:
+                self._toggle_user_stylesheet(window.webview, data)
+
+        if signal == 'run-js':
+            js_data = data
+            print(view_dict)
 
         return True
 
@@ -678,6 +703,17 @@ class BrowserProc(Gtk.Application):
             menu_item = WebKit2.ContextMenuItem.new(action)
             menu.append(menu_item)
 
+            # Reader mode menu item
+            if self._reader_js:
+                item_label = 'Web Mode' if view_dict.reader_mode else 'Reader Mode'
+                action = Gtk.Action('reader-mode', item_label, item_label, '')
+                icon = Gio.ThemedIcon.new_with_default_fallbacks('view-reader-symbolic')
+                action.set_gicon(icon)
+                action.connect('activate', self._context_activate, '',
+                               view_dict)
+                menu_item = WebKit2.ContextMenuItem.new(action)
+                menu.append(menu_item)
+
         translate = (
                 ('OPEN_LINK', 'folder-symbolic'),
                 ('OPEN_LINK_IN_NEW_WINDOW', 'folder-symbolic'),
@@ -773,6 +809,17 @@ class BrowserProc(Gtk.Application):
             res.get_data(None, self._get_source, view_dict)
             return True
 
+        if action.get_name() == 'reader-mode':
+            if view_dict.reader_mode:
+                view_dict.webview.go_back()
+                view_dict.reader_mode = False
+                return True
+
+            res = view_dict.webview.run_javascript(self._reader_js, None,
+                                                   self._reader_js_callback,
+                                                   view_dict)
+            return True
+
         if action.get_name() == 'search-web':
             selected_text = urllib.parse.quote(selected_text)
             try:
@@ -790,6 +837,39 @@ class BrowserProc(Gtk.Application):
             new_tab.load(selected_text)
 
         return True
+
+    def _reader_js_callback(self, webview: object, result: object,
+                            view_dict: object):
+        """ Reader js finish.
+
+        """
+
+        reader_result = webview.run_javascript_finish(result)
+        if reader_result:
+            view_dict.reader_mode = True
+        reader_js_value = reader_result.get_js_value()
+        byline = reader_js_value.object_get_property('byline').to_string()
+        byline = "" if byline == 'null' else byline
+        content = reader_js_value.object_get_property('content').to_string()
+        title = reader_js_value.object_get_property('title').to_string()
+        font_style = 'Serif'
+        color_scheme = 'Light'
+        html = f"""
+                <style>{self._reader_css}</style>
+                <title>{title}</title>
+                <body class='{font_style} {color_scheme}'>
+                <article>
+                    <h2>
+                        {title}
+                    </h2>
+                    <i>
+                        {byline}
+                    </i>
+                    <hr>
+                    {content}
+                </article>
+                """
+        webview.load_alternate_html(html, webview.get_uri(), None)
 
     def _load(self, view_dict: dict, data: str):
         """ Load the data in the webview in view_dict.
@@ -822,6 +902,36 @@ class BrowserProc(Gtk.Application):
 
         return data
 
+    def _resource_response_changed(self, resource: object, response: object,
+                                   view_dict: object):
+        """ Grab audio and video resources as they are loaded.
+
+        """
+
+        response = resource.get_response()
+        if response:
+            uri = response.get_uri()
+
+            filename = response.get_suggested_filename()
+            if not filename: filename = uri.split('/')[-1]
+
+            length = response.get_content_length()
+            mimetype = response.get_mime_type()
+
+            webview = view_dict.webview
+            user_agent = webview.get_settings().get_property('user-agent')
+
+            if 'video' in mimetype or 'audio' in mimetype:
+                info_dict = {
+                        'uri': uri,
+                        'filename': filename,
+                        'mime-type': mimetype,
+                        'length': length,
+                        'user-agent': user_agent,
+                        'start': False,
+                        }
+                view_dict.send('download', info_dict)
+
     def _resource_started(self, webview: object, resource: object,
                           request: object, view_dict: dict):
         """ Moniter resources.
@@ -829,6 +939,7 @@ class BrowserProc(Gtk.Application):
         """
 
         uri = request.get_uri()
+        resource.connect('notify::response', self._resource_response_changed, view_dict)
 
         for _, regex in self._media_filters.items():
             if regex.search(uri):
@@ -848,9 +959,10 @@ class BrowserProc(Gtk.Application):
                 view_dict.send('download', info_dict)
 
         logging.debug(f"RESOURCE {uri}")
-        if webview.get_uri().startswith('https') and uri.startswith('http:'):
-            logging.info(f"INSECURE RESOURCE: {uri}")
-            view_dict.send('insecure-content', True)
+        if webview.get_uri():
+            if webview.get_uri().startswith('https') and uri.startswith('http:'):
+                logging.info(f"INSECURE RESOURCE: {uri}")
+                view_dict.send('insecure-content', True)
 
     def _permission(self, webview: object, request: object, view_dict: dict):
         """ Grant or deny permission for request.
@@ -943,11 +1055,10 @@ class BrowserProc(Gtk.Application):
 
             if not decision.is_mime_type_supported():
                 filename = response.get_suggested_filename()
+                if not filename: filename = uri.split('/')[-1]
                 mimetype = response.get_mime_type()
                 length = response.get_content_length()
                 user_agent = webview.get_settings().get_property('user-agent')
-                if not filename:
-                    filename = uri.split('/')[-1]
                 info_dict = {
                         'uri': uri,
                         'filename': filename,
