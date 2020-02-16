@@ -101,6 +101,9 @@ class BrowserProc(Gtk.Application):
         self._reader_js = com_dict['reader-js']
         self._reader_css = com_dict['reader-css']
         self._user_stylesheet = com_dict['user-stylesheet']
+        self._profile_path = com_dict['profile-path']
+
+        self._cancellable = Gio.Cancellable.new()
 
         # Initialize the gtk application.
         Gtk.Application.__init__(self,
@@ -167,7 +170,76 @@ class BrowserProc(Gtk.Application):
         # Apply content filters to the new webview
         self._apply_content_filters(webview)
 
+        self._load_user_scripts(webview)
+
         return webview
+
+    def _load_user_scripts(self, webview: object):
+        """ Load and add all user.js scripts in the profile directory.
+
+        """
+        times_dict = {
+                'document-start': WebKit2.UserScriptInjectionTime.START,
+                'document-end': WebKit2.UserScriptInjectionTime.END,
+                }
+        for filename in self._profile_path.iterdir():
+            if filename.match('*.user.js'):
+                prepend_script = []
+                script_text = filename.read_text()
+                whitelist = []
+                blacklist = []
+                injection_time = times_dict['document-start']
+                injection_frames = WebKit2.UserContentInjectedFrames.ALL_FRAMES
+                for line in script_text.splitlines():
+                    line_value = line.split()[-1]
+                    if '/UserScript' in line: break
+                    if '@include' in line: whitelist.append(line_value)
+                    if '@match' in line: whitelist.append(line_value)
+                    if '@exclude' in line: blacklist.append(line_value)
+                    if '@run-at' in line:
+                        injection_time = times_dict.get(line_value,
+                                                        times_dict['document-start'])
+                    if '@noframes' in line:
+                        injection_frames = WebKit2.UserContentInjectedFrames.TOP_FRAME
+                    else:
+                        injection_frames = WebKit2.UserContentInjectedFrames.ALL_FRAMES
+                    if '@require' in line:
+                        tmp_file = Gio.File.new_for_uri(line_value)
+                        result, content, etag_out = tmp_file.load_contents(self._cancellable)
+                        if not result: continue
+                        prepend_script.append(content.decode())
+                        # webview.run_javascript(content.decode(),
+                        #                        self._cancellable,
+                        #                        self._run_js_callback, None)
+                        # self._add_user_script(webview, (content.decode(),
+                        #                                 times_dict['document-start'],
+                        #                                 WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                        #                                 whitelist, blacklist))
+
+                logging.info(f'SCRIPT INFO: {whitelist=} {blacklist=} {injection_time=} {injection_frames=}')
+                prepend_script.append(script_text)
+                script_text = '\n'.join(prepend_script)
+                self._add_user_script(webview, (script_text, injection_time,
+                                                injection_frames, whitelist,
+                                                blacklist))
+
+    def _run_js_callback(self, webview: object, result: object,
+                         user_data: object):
+        """ Finish running the javascript.
+
+        """
+
+        js_result = webview.run_javascript_finish(result)
+
+    def _add_user_script(self, webview: object, script_tup: tuple):
+        """ Create a Webkit2.UserScript and add it to the webview's content
+        manager.
+
+        """
+
+        user_content_manager = webview.get_user_content_manager()
+        user_script = WebKit2.UserScript.new(*script_tup)
+        user_content_manager.add_script(user_script)
 
     def _toggle_user_stylesheet(self, webview: object, enable: bool):
         """ Add/Remove the user stylesheet from webview.
@@ -466,8 +538,10 @@ class BrowserProc(Gtk.Application):
             # Close all temporary files.
             for f in self._tmp_files: f.close()
 
+            self._cancellable.cancel()
+
             logging.info(f"DESTROYING: {self._pid}")
-            #Gtk.main_quit()
+
             self.quit()
 
         send_dict = {

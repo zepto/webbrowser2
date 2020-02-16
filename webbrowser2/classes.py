@@ -1086,7 +1086,11 @@ class SettingsManager(Gtk.Grid):
 
         """
 
-        for setting, value in sorted(settings.items()):
+        # Sort in this order bool, int, str, other.
+        key_func = lambda tup: \
+            '%s%s' % ({bool: 0, int: 1, str: 3}.get(type(tup[1]), 4), tup[0])
+
+        for setting, value in sorted(settings.items(), key=key_func):
             if type(value) == str:
                 self.add_str_setting(setting, value)
             elif type(value) == bool:

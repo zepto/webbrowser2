@@ -492,9 +492,10 @@ class MainWindow(object):
 
         """
 
-        for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
+        # for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
 
         try:
+            child.closing = True
             child.send('close', True)
         except BrokenPipeError as err:
             logging.error(f'Broken Pipe: {err}')
@@ -637,7 +638,11 @@ class MainWindow(object):
 
         """
 
-        signal, data = window.recv()
+        try:
+            signal, data = window.recv()
+        except TypeError as err:
+            logging.error(f'{err}')
+            return True
 
         debug_list = ['mouse-motion', 'back-forward-list', 'can-go-back',
                       'can-go-forward', 'is-secure', 'icon-bytes',
@@ -1068,6 +1073,8 @@ class MainWindow(object):
             'session-dict': {},
             'sig-ids': [],
             'order': 0,
+            'closing': False,
+            'plug-added': False,
             })
 
         child['title-str'] = f'{child.title} (pid: {child.pid}) {child.private_str}'
@@ -1562,15 +1569,20 @@ class MainWindow(object):
 
         if self._tabs.get_nth_page(self._tabs.get_current_page()) == child['tab_grid']:
             self._to_last_tab(child)
-        if flags & Gdk.ModifierType.MOD1_MASK:
-            for tab in self._windows.values():
-                if tab['pid'] == child['pid']:
-                    self._tabs.remove_page(self._tabs.page_num(tab['tab_grid']))
-            logging.info("sending Terminate")
-            self._send('terminate', child['pid'])
-        else:
-            logging.info("sending Close")
-            child.close()
+        # if flags & Gdk.ModifierType.MOD1_MASK:
+        #     # for tab in self._windows.values():
+        #     #     if tab['pid'] == child['pid']:
+        #     #         self._tabs.remove_page(self._tabs.page_num(tab['tab_grid']))
+        #     child.terminated = True
+        #     logging.info("sending Terminate")
+        #     self._send('terminate', child['pid'])
+        # else:
+        logging.info("sending Close")
+        child.close()
+
+        # If the plug failedd to add itself then close the tab.
+        if not child.plug_added:
+            self._tabs.remove_page(self._tabs.page_num(child['tab_grid']))
 
         return True
 
@@ -1654,11 +1666,18 @@ class MainWindow(object):
 
         logging.info(f"PLUG REMOVED: {child.uri}")
         self._send('terminate', child['pid'])
-        self._restore_session(child.session_dict)
+
+        # Do not restore the session if the plug was removed due to
+        # closing the tab.
+        if not child.closing: self._restore_session(child.session_dict)
 
         child.com_pipe.close()
         child.child_pipe.close()
         self._tabs.remove_page(self._tabs.page_num(child.tab_grid))
+
+        # Disconnect all signals from child after the plug is removed
+        # and the tab is closed.
+        for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
 
         self._windows.pop(child.socket_id).clear()
 
@@ -1670,6 +1689,7 @@ class MainWindow(object):
         """
 
         logging.info(f'PLUG ADDED to {child.tab_grid}')
+        child.plug_added = True
         # child.tab_grid.show_all()
         # child.find_bar.hide()
         # if child.focus:
