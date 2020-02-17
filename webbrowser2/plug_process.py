@@ -564,7 +564,14 @@ class BrowserProc(Gtk.Application):
 
         logging.debug(f"IN RECIEVE: {view_dict.com_pipe}")
 
-        signal, data = view_dict.recv()
+        try:
+            signal, data = view_dict.recv()
+        except EOFError as err:
+            logging.error(f'IN PLUG _recieve: EOF')
+            return False
+        except TypeError as err:
+            logging.error(f'IN PLUG _recieve: {err}')
+            return True
 
         if signal in ['restore-session']:
             logging.debug(f'SIGNAL: {signal}, DATA: {data}')
@@ -952,9 +959,12 @@ class BrowserProc(Gtk.Application):
 
         data = data.strip()
 
-        if data == 'about:blank': return data
 
         webview = view_dict.webview
+
+        if data == 'about:blank':
+            webview.load_uri('about:blank')
+            return data
 
         if '\n' not in data:
             if not looks_like_uri(data):
@@ -1033,8 +1043,9 @@ class BrowserProc(Gtk.Application):
                 view_dict.send('download', info_dict)
 
         logging.debug(f"RESOURCE {uri}")
-        if webview.get_uri():
-            if webview.get_uri().startswith('https') and uri.startswith('http:'):
+        webview_uri = webview.get_uri()
+        if webview_uri:
+            if webview_uri.startswith('https') and uri.startswith('http:'):
                 logging.info(f"INSECURE RESOURCE: {uri}")
                 view_dict.send('insecure-content', True)
 

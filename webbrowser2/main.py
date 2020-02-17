@@ -47,6 +47,28 @@ def run_main(com_pipe: object, **kwargs):
     main_window.run()
 
 
+def terminate_proc(proc: object):
+    """ Terminate and close a process.
+
+    """
+
+    if not proc: return True
+    # If the process has exited do not join it.
+    if not proc.is_alive(): return True
+
+    pid = proc.pid
+
+    logging.info(f"Joining: {proc}")
+    proc.join(1)
+    while proc.is_alive():
+        logging.info(f"Terminating: {proc}")
+        proc.terminate()
+    proc.close()
+    logging.info(f'PID {pid} Closed')
+
+    return True
+
+
 def main(main_proc: object, main_cpipe: object):
     """ Listen on main_cpipe for signals.  Depending on what signal is recieved
     it will start new child processes.
@@ -66,8 +88,8 @@ def main(main_proc: object, main_cpipe: object):
         if signal == 'refresh':
             # Make sure all children exit.
             logging.info('\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
-            for pid, proc in window_dict.items():
-                logging.info(f'PROCESS: {pid}')
+            for pid, proc in tuple(window_dict.items()):
+                logging.info(f'PROCESS: {pid} {proc.exitcode=} {proc.is_alive()=}')
         if signal == 'new-proc':
             proc = Process(target=run_browser, args=(data,))
             proc.start()
@@ -76,28 +98,25 @@ def main(main_proc: object, main_cpipe: object):
             window_dict[proc.pid] = proc
             logging.info(f"child pid: {proc.pid}")
             logging.info(f'window_dict: {window_dict}')
-
-        elif signal == 'terminate':
-            proc = window_dict.pop(data, None)
+        elif signal == 'is-alive':
+            proc = window_dict.get(data, None)
             if proc:
-                logging.info(f'Joining pid: {data}')
                 proc.join(1)
-                if proc.is_alive():
-                    logging.info(f"Terminating: {proc}")
-                    proc.terminate()
+                main_cpipe.send(('is-alive', proc.is_alive()))
+                if not proc.is_alive(): window_dict.pop(data, None)
+            else:
+                main_cpipe.send(('is-alive', False))
+        elif signal == 'terminate':
+            terminate_proc(window_dict.pop(data, None))
 
     logging.info("Quitting")
 
     logging.info(window_dict)
-    for pid, proc in window_dict.items():
-        logging.info(f"Joining: {proc}")
-        proc.join(1)
-        if proc.is_alive():
-            logging.info(f"Terminating: {proc}")
-            proc.terminate()
+
+    for proc in window_dict.values(): terminate_proc(proc)
 
     # Make sure all children exit.
-    active_children()
+    logging.info('\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
 
     return
 

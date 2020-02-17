@@ -89,7 +89,7 @@ class MainWindow(object):
         self._find_icon = Gio.ThemedIcon.new_with_default_fallbacks(
                 'edit-find-symbolic')
 
-        css_provider = Gtk.CssProvider.get_default()
+        css_provider = Gtk.CssProvider.new()
         css_provider.load_from_data(b'''
                 #not-found {
                     background: #ff5555;
@@ -267,6 +267,8 @@ class MainWindow(object):
         filter_path = self._profile.get_path('content-filters')
         self._content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
 
+        self._home_uri = self._profile.home_uri
+
         # Save any not saved content filters.
         self._content_filter_set_active(self._content_filter_settings)
 
@@ -275,8 +277,9 @@ class MainWindow(object):
         # Recover the previous session.
         self._session_manager.restore_all()
 
+        if uri_list == ['about:blank']: uri_list = [self._home_uri]
         for uri in uri_list:
-            if not self._windows and uri == 'about:blank':
+            if not self._windows: # and uri == 'about:blank':
                 self._new_proc(*self._make_tab(uri=uri, focus=True))
 
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
@@ -346,6 +349,8 @@ class MainWindow(object):
                     child.tab_grid.attach(child.address_bar, 0, 0, 1, 1)
         elif setting == 'enable-user-stylesheet':
             self._send_all('enable-user-stylesheet', value)
+        elif setting == 'home-uri':
+            self._home_uri = value if value else 'about:blank'
         else:
             self._send_all('web-view-settings', (setting, value))
 
@@ -487,18 +492,59 @@ class MainWindow(object):
             state = Gdk.WindowState.TILED
         return False
 
-    def _close_child(self, child: dict):
+    def _close_wait(self, child: dict) -> bool:
+        """ Check if the child is still running.  If it is not running remove
+        the tab.
+
+        """
+
+        self._send('refresh', True)
+        self._send('is-alive', child.pid)
+        signal, is_alive = self._recv()
+        if signal != 'is-alive': return True
+        if not is_alive and child: child.remove_tab()
+        return False
+
+    def _close_child(self, child: dict) -> bool:
         """ Close a tab.
 
         """
 
-        # for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
+        # Do not try to close more than once.
+        if child.closing: return True
+
+        # Disconnect all signals from child before closing it.
+        for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
+
+        child.closing = True
 
         try:
-            child.closing = True
             child.send('close', True)
         except BrokenPipeError as err:
             logging.error(f'Broken Pipe: {err}')
+            child.remove_tab()
+
+        # If the plug failed to add itself then close the tab.
+        if not child.plug_added: child.remove_tab()
+
+        return True
+
+    def _remove_tab(self, child: dict):
+        """ Remove the tab and close its pipe.
+
+        """
+
+        # Remove the io watch for child.
+        GLib.Source.remove(child['event-source-id'])
+
+        self._tabs.remove_page(self._tabs.page_num(child.tab_grid))
+
+        child.com_pipe.close()
+        child.child_pipe.close()
+
+        self._windows.pop(child.socket_id).clear()
+
+        logging.info('CLEAR')
 
     def _delete_event(self, window: object, event: object):
         """ Try to close all tabs first.
@@ -530,7 +576,9 @@ class MainWindow(object):
             logging.info("CLOSING ALL TABS")
 
             # Send the close signal to all tabs.
-            for child in self._windows.values(): child.close()
+            for child in tuple(self._windows.values()): child.close()
+
+        logging.info(f'SOCKET PROCESS: Sent close to child')
 
         # Don't let the window be destroyed until all the tabs are
         # closed.
@@ -594,6 +642,8 @@ class MainWindow(object):
 
         """
 
+        if not session: return False
+
         pid = session.get('pid', 0)
         private = session.get('private', True)
 
@@ -607,12 +657,14 @@ class MainWindow(object):
             # This is the first session from this pid to be restored, so
             # start a new process for it.
             init_dict, child = self._make_tab(private=private,
-                                              focus=session['focus'])
+                                              focus=session.get('focus', True))
             self._pid_map[pid] = self._new_proc(init_dict, child)
             child.set_state(session['state'])
             # child.order = session.get('order', 0)
             self._tabs.reorder_child(child.tab_grid, session['index'])
         child.send('restore-session', session)
+
+        return True
 
     def _update_session(self, child: dict, session_data: bytes = {}) -> dict:
         """ Return a dictionary of session information for child.
@@ -641,7 +693,7 @@ class MainWindow(object):
         try:
             signal, data = window.recv()
         except TypeError as err:
-            logging.error(f'{err}')
+            logging.error(f'{source} {cb_condition} socket_process _callback {err} for {window}')
             return True
 
         debug_list = ['mouse-motion', 'back-forward-list', 'can-go-back',
@@ -665,11 +717,7 @@ class MainWindow(object):
                 logging.info(f'Sending terminate for: {window.pid}')
                 self._send('terminate', window.pid)
 
-            self._tabs.remove_page(self._tabs.page_num(window.tab_grid))
-
-            window.com_pipe.close()
-            self._windows.pop(window.socket_id).clear()
-            logging.info('CLEAR')
+            window.remove_tab()
             return False
 
         if signal == 'mouse-motion':
@@ -708,7 +756,8 @@ class MainWindow(object):
 
         if signal == 'load-status' and data == 0:
             window.address_entry.set_name('')
-            window.address_entry.set_text(window.uri)
+            uri_str = '' if window.uri == 'about:blank' else window.uri
+            window.address_entry.set_text(uri_str)
             window.address_entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
                                              self._stop_icon)
             window.address_entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
@@ -754,14 +803,19 @@ class MainWindow(object):
                 window.address_entry.set_name('unverified')
 
             if verified and window.get('insecure-content', True):
-                insecure_str = '  Page contains insecure content.'
+                insecure_str = ' Page contains insecure content.'
                 window.address_entry.set_name('insecure')
 
             if not window.uri.startswith('https'):
                 verified_str = 'Page is insecure.'
                 window.address_entry.set_name('unverified')
 
-            tooltip_text = f'{verified_str} {insecure_str}'
+            if window.uri == 'about:blank':
+                tooltip_text = 'Enter address or search terms.'
+                window.address_entry.set_name('neutral')
+            else:
+                tooltip_text = f'{verified_str} {insecure_str}'
+
             window.address_entry.set_tooltip_text(tooltip_text)
 
         if signal == 'insecure-content':
@@ -822,6 +876,7 @@ class MainWindow(object):
         child.title_str = f'{child.title} (pid: {child.pid}) {child.private_str}'
         child.label.set_text(child.title_str)
         child.event_box.set_tooltip_text(child.title_str)
+        # Set window title if child is focused.
         if child == self._get_child_dict():
             self._window.set_title(f'{child.title_str} - {self._name}')
 
@@ -1025,7 +1080,7 @@ class MainWindow(object):
         index = self._tabs.insert_page(tab_grid, eventbox, i)
         self._tabs.set_tab_reorderable(tab_grid, True)
 
-        socket_id = socket.get_id()
+        tab_grid.socket_id = socket_id = socket.get_id()
 
         child.update({
             'close': lambda: self._close_child(child),
@@ -1070,6 +1125,7 @@ class MainWindow(object):
             'state': {'minimized': False, 'hidden': False},
             'set-state': lambda state: self._set_state(child, state),
             'update-session': lambda data: self._update_session(child, data),
+            'remove-tab': lambda: self._remove_tab(child),
             'session-dict': {},
             'sig-ids': [],
             'order': 0,
@@ -1116,7 +1172,9 @@ class MainWindow(object):
                 )
 
         for widget, event, func, *args in signal_handlers:
-            child.sig_ids.append((widget, widget.connect(event, func, *args)))
+            sig_id = widget.connect(event, func, *args)
+            if widget not in [tab_close_btn]:
+                child.sig_ids.append((widget, sig_id))
 
         child['event-source-id'] = GLib.io_add_watch(com_pipe.fileno(),
                                                      GLib.IO_IN,
@@ -1157,7 +1215,10 @@ class MainWindow(object):
         if self._profile.hide_address_bar:
             child = self._get_child_dict()
             child.address_bar.show_all()
-            child.address_entry.grab_focus()
+            # Do not focus the entry if the popover is visible otherwise
+            # it will close when the user tries to use it.
+            if not self._main_popover.get_property('visible'):
+                child.address_entry.grab_focus()
 
     def _escape(self, accels: object, window: object, keyval: object, flags: object):
         """ Do stuff.
@@ -1468,7 +1529,8 @@ class MainWindow(object):
 
         """
 
-        self._open_new_tab(event.state, settings={'focus': True})
+        self._open_new_tab(event.state, settings={'uri': self._home_uri,
+                                                  'focus': True})
 
         return True
 
@@ -1557,6 +1619,8 @@ class MainWindow(object):
 
         """
 
+        # Close tab if middle clicked, left clicked with ctrl pressed,
+        # or the close button is pressed.
         if event.button == 2 or (event.button == 1 and \
                 event.state & Gdk.ModifierType.CONTROL_MASK) or \
                 widget == child.close_button:
@@ -1567,22 +1631,23 @@ class MainWindow(object):
 
         """
 
+        # Switch to the last focused tab before closing the current tab.
         if self._tabs.get_nth_page(self._tabs.get_current_page()) == child['tab_grid']:
             self._to_last_tab(child)
-        # if flags & Gdk.ModifierType.MOD1_MASK:
-        #     # for tab in self._windows.values():
-        #     #     if tab['pid'] == child['pid']:
-        #     #         self._tabs.remove_page(self._tabs.page_num(tab['tab_grid']))
-        #     child.terminated = True
-        #     logging.info("sending Terminate")
-        #     self._send('terminate', child['pid'])
-        # else:
-        logging.info("sending Close")
-        child.close()
 
-        # If the plug failedd to add itself then close the tab.
-        if not child.plug_added:
-            self._tabs.remove_page(self._tabs.page_num(child['tab_grid']))
+        # Force the tab to close and terminate the child process if ALT
+        # is pressed or this is not the first attempt to close the
+        # child.
+        if flags & Gdk.ModifierType.MOD1_MASK or child.closing:
+            child_pid = child['pid']
+            for tab in tuple(self._windows.values()):
+                if tab['pid'] == child['pid']:
+                    child.remove_tab()
+            logging.info("sending Terminate")
+            self._send('terminate', child_pid)
+        else:
+            logging.info("sending Close")
+            child.close()
 
         return True
 
@@ -1598,14 +1663,7 @@ class MainWindow(object):
         if not tab_grid:
             tab_grid = self._tabs.get_nth_page(self._tabs.get_current_page())
 
-        for widget in tab_grid.get_children():
-            if widget.get_name() == 'overlay':
-                break
-
-        while not widget.get_children(): pass
-
-        socket = widget.get_children()[0]
-        return self._windows[socket.get_id()]
+        return self._windows[tab_grid.socket_id]
 
     def _new_tab(self, accels: object, window: object, keyval: object,
                  flags: object):
@@ -1613,11 +1671,11 @@ class MainWindow(object):
 
         """
 
-        settings = {'focus': True, 'uri': 'about:blank'}
+        settings = {'focus': True, 'uri': self._home_uri}
         self._open_new_tab(flags, settings=settings)
 
     def _close_tab_key(self, accels: object, window: object, keyval: object,
-                   flags: object):
+                       flags: object):
         """ Close tab.
 
         """
@@ -1671,15 +1729,7 @@ class MainWindow(object):
         # closing the tab.
         if not child.closing: self._restore_session(child.session_dict)
 
-        child.com_pipe.close()
-        child.child_pipe.close()
-        self._tabs.remove_page(self._tabs.page_num(child.tab_grid))
-
-        # Disconnect all signals from child after the plug is removed
-        # and the tab is closed.
-        for widget, sig_id in child.sig_ids: widget.disconnect(sig_id)
-
-        self._windows.pop(child.socket_id).clear()
+        child.remove_tab()
 
         return True
 

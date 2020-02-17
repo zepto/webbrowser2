@@ -98,7 +98,16 @@ class Profile(dict):
 
         with pathlib.Path(self._config_file) as config_file:
             if config_file.is_file():
-                self.update(json_loads(config_file.read_text()))
+                config_dict = json_loads(config_file.read_text())
+                for key, value in config_dict.items():
+                    try:
+                        self[key] = self[key]
+                    except KeyError as err:
+                        self[key] = value
+                    if hasattr(self[key], 'update'):
+                        self[key].update(value)
+                    else:
+                        self[key] = value
 
         self._socket_file = self._config_path.joinpath(__name__ + '.sock')
         self.sessions_file = self._config_path.joinpath('sessions.json')
@@ -191,6 +200,8 @@ class Profile(dict):
                 self[key] = False
             elif key == 'enable-user-stylesheet':
                 self[key] = False
+            elif key == 'home-uri':
+                self[key] = 'https://www.startpage.com'
             return super(Profile, self).__getitem__(key)
 
     def __getattr__(self, item: str):
@@ -1068,6 +1079,9 @@ class SettingsManager(Gtk.Grid):
 
         self.show_all()
 
+        self.add_str_setting('home-uri', self._profile.home_uri,
+                              'Homepage URI',
+                              'The default homepage.')
         self.add_bool_setting('hide-address-bar',
                               self._profile.hide_address_bar,
                               'Auto Hide Address Bar',
@@ -1144,6 +1158,7 @@ class SettingsManager(Gtk.Grid):
         entry.set_margin_bottom(3)
         entry.set_hexpand(True)
         entry.set_text(value)
+        entry.connect('activate', self._setting_changed, entry.get_text, setting)
 
         icon = Gio.ThemedIcon.new_with_default_fallbacks('emblem-ok-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
@@ -1228,7 +1243,10 @@ class SettingsManager(Gtk.Grid):
         """
 
         value = get_value()
-        self._profile.web_view_settings[setting] = value
+        if setting == 'home-uri':
+            self._profile.home_uri = value
+        else:
+            self._profile.web_view_settings[setting] = value
         self.emit('setting-changed', setting, value)
 
     def _switch_active(self, switch: object, prop: object, setting: str):
