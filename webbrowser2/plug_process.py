@@ -482,11 +482,9 @@ class BrowserProc(Gtk.Application):
         session_data = b''
 
         if not view_dict.is_blank_page():
-            print('getting session')
             session_bytes = webview.get_session_state().serialize()
             session_data = codecs.encode(session_bytes.get_data(), 'base64')
 
-        print(f'session is here {len(session_data)=}')
         return session_data.decode()
 
     def _is_blank(self, view_dict: dict):
@@ -673,13 +671,11 @@ class BrowserProc(Gtk.Application):
                 self._apply_content_filters(window.webview)
 
         if signal == 'enable-user-stylesheet':
-            print(signal, data)
             for window in self._windows:
                 self._toggle_user_stylesheet(window.webview, data)
 
         if signal == 'run-js':
             js_data = data
-            print(view_dict)
 
         return True
 
@@ -897,7 +893,6 @@ class BrowserProc(Gtk.Application):
             if view_dict.reader_mode:
                 # view_dict.webview.go_back()
                 view_dict.reader_mode = False
-                print(f'restoring session of length {len(view_dict.freeze_session)=}')
                 view_dict.restore_session(view_dict.freeze_session)
                 return True
 
