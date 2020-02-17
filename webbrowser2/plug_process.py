@@ -367,6 +367,7 @@ class BrowserProc(Gtk.Application):
             'webview-sig-ids': [],
             'session': b'',
             'reader-mode': False,
+            'freeze-session': b'',
             })
 
         if socket_id: view_dict['plug'] = self._create_plug(view_dict)
@@ -481,9 +482,11 @@ class BrowserProc(Gtk.Application):
         session_data = b''
 
         if not view_dict.is_blank_page():
+            print('getting session')
             session_bytes = webview.get_session_state().serialize()
             session_data = codecs.encode(session_bytes.get_data(), 'base64')
 
+        print(f'session is here {len(session_data)=}')
         return session_data.decode()
 
     def _is_blank(self, view_dict: dict):
@@ -493,8 +496,8 @@ class BrowserProc(Gtk.Application):
 
         webview = view_dict.webview
         uri = webview.get_uri()
-        logging.info((f'IS BLANK {uri} {webview.can_go_back()} '
-                      f'{webview.can_go_forward()}'))
+        logging.info((f'IS BLANK {uri} {webview.can_go_back()=} '
+                      f'{webview.can_go_forward()=}'))
 
         return not (webview.can_go_back() or webview.can_go_forward() or
                     (uri and uri != 'about:blank'))
@@ -892,8 +895,10 @@ class BrowserProc(Gtk.Application):
 
         if action.get_name() == 'reader-mode':
             if view_dict.reader_mode:
-                view_dict.webview.go_back()
+                # view_dict.webview.go_back()
                 view_dict.reader_mode = False
+                print(f'restoring session of length {len(view_dict.freeze_session)=}')
+                view_dict.restore_session(view_dict.freeze_session)
                 return True
 
             res = view_dict.webview.run_javascript(self._reader_js, None,
@@ -928,6 +933,13 @@ class BrowserProc(Gtk.Application):
         reader_result = webview.run_javascript_finish(result)
         if reader_result:
             view_dict.reader_mode = True
+        else:
+            return False
+
+        # Save the session so when exiting reader mode the history list
+        # won't be changed.
+        view_dict.freeze_session = view_dict.get_session()
+
         reader_js_value = reader_result.get_js_value()
         byline = reader_js_value.object_get_property('byline').to_string()
         byline = "" if byline == 'null' else byline
@@ -950,6 +962,7 @@ class BrowserProc(Gtk.Application):
                     {content}
                 </article>
                 """
+
         webview.load_alternate_html(html, webview.get_uri(), None)
 
     def _load(self, view_dict: dict, data: str):
@@ -962,9 +975,7 @@ class BrowserProc(Gtk.Application):
 
         webview = view_dict.webview
 
-        if data == 'about:blank':
-            webview.load_uri('about:blank')
-            return data
+        if data == 'about:blank': return data
 
         if '\n' not in data:
             if not looks_like_uri(data):

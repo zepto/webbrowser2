@@ -1404,7 +1404,7 @@ class MainWindow(object):
         hist_list = child.forward_list if index == 1 else child.back_list
 
         if event.button == 3:
-            menu = self._make_history_menu(hist_list, True, child)
+            menu = self._make_history_menu(hist_list, bool(index  - 1), child)
             menu.popup(None, None, None, None, event.button, event.time)
             logging.debug(f'{hist_list} {event.time}')
         else:
