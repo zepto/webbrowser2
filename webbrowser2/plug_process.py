@@ -890,10 +890,10 @@ class BrowserProc(Gtk.Application):
             return True
 
         if action.get_name() == 'reader-mode':
-            if view_dict.reader_mode:
-                # view_dict.webview.go_back()
+            if view_dict.reader_mode and view_dict.freeze_session:
                 view_dict.reader_mode = False
                 view_dict.restore_session(view_dict.freeze_session)
+                view_dict.freeze_session = b''
                 return True
 
             res = view_dict.webview.run_javascript(self._reader_js, None,
@@ -926,14 +926,7 @@ class BrowserProc(Gtk.Application):
         """
 
         reader_result = webview.run_javascript_finish(result)
-        if reader_result:
-            view_dict.reader_mode = True
-        else:
-            return False
-
-        # Save the session so when exiting reader mode the history list
-        # won't be changed.
-        view_dict.freeze_session = view_dict.get_session()
+        if not reader_result: return False
 
         reader_js_value = reader_result.get_js_value()
         byline = reader_js_value.object_get_property('byline').to_string()
@@ -958,19 +951,31 @@ class BrowserProc(Gtk.Application):
                 </article>
                 """
 
-        webview.load_alternate_html(html, webview.get_uri(), None)
+        view_dict.load(html)
+        view_dict.reader_mode = True
+
+        # Save the session so when exiting reader mode the history list
+        # won't be changed.
+        view_dict.freeze_session = view_dict.get_session()
 
     def _load(self, view_dict: dict, data: str):
         """ Load the data in the webview in view_dict.
 
         """
 
-        data = data.strip()
+        if view_dict.reader_mode and view_dict.freeze_session:
+            view_dict.reader_mode = False
+            view_dict.restore_session(view_dict.freeze_session)
+            view_dict.freeze_session = b''
 
+        data = data.strip()
 
         webview = view_dict.webview
 
-        if data == 'about:blank': return data
+        # Load a blank page if the uri is 'about:blank.'
+        if data == 'about:blank':
+            webview.load_uri('')
+            return data
 
         if '\n' not in data:
             if not looks_like_uri(data):
@@ -989,6 +994,8 @@ class BrowserProc(Gtk.Application):
 
             webview.grab_focus()
             view_dict.send('title', data)
+        else:
+            webview.load_alternate_html(data, webview.get_uri(), None)
 
         return data
 
