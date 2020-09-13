@@ -1100,6 +1100,7 @@ class BrowserProc(Gtk.Application):
         # apply content filters.
         user_content_manager = webview.get_user_content_manager()
         for _, (whitelisted_uri, active) in self._content_filter_whitelist.items():
+            if not page_uri: break
             if whitelisted_uri in page_uri and active:
                 user_content_manager.remove_all_filters()
                 break
