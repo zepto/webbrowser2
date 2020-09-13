@@ -89,6 +89,7 @@ class BrowserProc(Gtk.Application):
                 self._media_filters[name] = re.compile(regex)
 
         self._content_filters = com_dict.get('content-filters', {})
+        self._content_filter_whitelist = com_dict.get('content-filter-whitelist', {})
 
         self._enable_user_stylesheet = com_dict.get('enable-user-stylesheet',
                                                     False)
@@ -670,6 +671,10 @@ class BrowserProc(Gtk.Application):
             for window in self._windows:
                 self._apply_content_filters(window.webview)
 
+        if signal == 'content-filter-whitelist':
+            name, uri, active = data
+            self._content_filter_whitelist[name] = (uri, active)
+
         if signal == 'enable-user-stylesheet':
             for window in self._windows:
                 self._toggle_user_stylesheet(window.webview, data)
@@ -1090,6 +1095,17 @@ class BrowserProc(Gtk.Application):
         """
 
         page_uri = webview.get_uri()
+
+        # Remove all content filters from whitelisted uris, otherwise
+        # apply content filters.
+        user_content_manager = webview.get_user_content_manager()
+        for _, (whitelisted_uri, active) in self._content_filter_whitelist.items():
+            if whitelisted_uri in page_uri and active:
+                user_content_manager.remove_all_filters()
+                break
+        else:
+            self._apply_content_filters(webview)
+
         if decision_type in \
                 [WebKit2.PolicyDecisionType.NAVIGATION_ACTION, \
                  WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION]:
@@ -1140,6 +1156,7 @@ class BrowserProc(Gtk.Application):
             if view_dict.webview.is_loading():
                 # Show a loading status.
                 view_dict.update_status(f'Request: {uri}...')
+
         elif decision_type == WebKit2.PolicyDecisionType.RESPONSE:
             response = decision.get_response()
             http_headers = response.get_http_headers()

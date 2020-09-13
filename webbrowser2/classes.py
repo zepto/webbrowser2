@@ -190,6 +190,8 @@ class Profile(dict):
                 self[key] = {
                         'easylist_min': ('https://easylist-downloads.adblockplus.org/easylist_min_content_blocker.json', True),
                         }
+            elif key == 'content-filter-whitelist':
+                self[key] = {}
             elif key == 'default-user-agent':
                 self[key] = 'Chromium'
             elif key == 'find-str':
@@ -1909,3 +1911,30 @@ class ContentFilterSettings(CheckListSettings):
         self._edit_data_title = 'Edit URI'
 
         super().__init__(filter_dict, parent)
+
+
+class ContentFilterWhitelistSettings(CheckListSettings):
+    """ Content Filter whitelist settings.
+
+    """
+
+    def __init__(self, whitelist_dict: dict, parent: object = None):
+        """ Create a list for configuring content filter files.
+
+        """
+
+        # Change these.
+        self._add_tooltip = 'Add New URL'
+        self._edit_tooltip = 'Edit URL'
+        self._remove_tooltip = 'Remove URL'
+        self._frame_text = 'Content Filter Whitelist'
+
+        self._add_title = 'Add URL'
+        self._add_name_title = 'Enter Name'
+        self._add_data_title = 'Enter URI'
+
+        self._edit_title = 'Edit URL'
+        self._edit_name_title = 'Edit Name'
+        self._edit_data_title = 'Edit URI'
+
+        super().__init__(whitelist_dict, parent)
