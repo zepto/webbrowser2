@@ -263,7 +263,8 @@ class Bookmarks(object):
         """
 
         with pathlib.Path(self._filename) as xbel_file:
-            xbel_file.rename(self._filename + '.bak')
+            if xbel_file.exists():
+                xbel_file.rename(self._filename + '.bak')
         self._tree.write(self._filename, encoding='UTF-8', xml_declaration=True)
 
 class BookmarkMenu(Gtk.Menu):
@@ -305,24 +306,6 @@ class BookmarkMenu(Gtk.Menu):
             self._built = True
         except Exception as err:
             logging.error('Error building bookmarks menu: {err}'.format(**locals()))
-
-    def _menu_position(self, menu: object, x: int, y: int,
-                       data: object) -> tuple:
-        """ Position the bookmark menu.
-
-        """
-
-        offset = 22
-        return (int(data.x_root - data.x),
-                int(data.y_root - data.y) + offset, False)
-
-    def popup(self, *args, **kwargs):
-        """ Popup the menu.
-
-        """
-
-        GLib.idle_add(self.show_all)
-        super().popup(*args, **kwargs)
 
     def update_menu(func: object) -> object:
         """ Update the menu after every method that changes the bookmarks.

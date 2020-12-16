@@ -1360,7 +1360,8 @@ class MainWindow(object):
             """
 
             # Grab the event out of args.
-            event = [i for i in args if type(i) == Gdk.EventButton][0]
+            types_list = [Gdk.Event, Gdk.EventButton]
+            event = [i for i in args if type(i) in types_list][0]
 
             # Don't do anything if the pointer was moved off the button.
             if event.window != event.device.get_window_at_position()[0]:
@@ -1498,9 +1499,9 @@ class MainWindow(object):
         """
 
         if icon_pos == Gtk.EntryIconPosition.PRIMARY:
-            self._bookmark_menu.popup(None, None,
-                                      self._bookmark_menu._menu_position,
-                                      event, event.button, event.time)
+            self._bookmark_menu.show_all()
+            self._bookmark_menu.popup_at_widget(entry, Gdk.Gravity.SOUTH_WEST,
+                                                Gdk.Gravity.NORTH_WEST, event)
             return False
 
         if icon_pos == Gtk.EntryIconPosition.SECONDARY:
