@@ -31,6 +31,7 @@ import subprocess
 import logging
 import codecs
 import urllib.parse
+import pathlib
 from multiprocessing import Pipe, Process
 from multiprocessing import current_process
 from gi import require_version as gi_require_version
@@ -52,6 +53,15 @@ class BrowserProc(Gtk.Application):
 
 
         """
+
+        self._pid = current_process().pid
+
+        # Initialize the gtk application.
+        super().__init__(application_id=f'org.webbrowser2.pid{self._pid}',
+                         flags=0)
+
+        profile_name = pathlib.Path(com_dict['profile-path']).name
+        GLib.set_prgname(f'org.webbrowser2.{profile_name}')
 
         css_provider = Gtk.CssProvider.get_default()
         css_provider.load_from_data(b'''
@@ -94,7 +104,6 @@ class BrowserProc(Gtk.Application):
         self._enable_user_stylesheet = com_dict.get('enable-user-stylesheet',
                                                     False)
 
-        self._pid = current_process().pid
 
         self._windows = []
 
@@ -105,11 +114,6 @@ class BrowserProc(Gtk.Application):
         self._profile_path = com_dict['profile-path']
 
         self._cancellable = Gio.Cancellable.new()
-
-        # Initialize the gtk application.
-        Gtk.Application.__init__(self,
-                                 application_id=f'org.webbrowser2.pid{self._pid}',
-                                 flags=0)
 
 
         socket_id, com_pipe = com_dict['socket-id'], com_dict['com-pipe']
@@ -436,7 +440,8 @@ class BrowserProc(Gtk.Application):
         try:
             com_pipe.send((signal, data))
         except BrokenPipeError as err:
-            logging.error(f"PIPE BROKE CLOSING: {err}")
+            logging.error(f"_send PIPE BROKE CLOSING: {err}")
+            self.quit()
 
     def _restore_session(self, session_data: bytes, view_dict: dict) -> bool:
         """ Restores the session for view_dict.
@@ -553,7 +558,7 @@ class BrowserProc(Gtk.Application):
         try:
             view_dict.send('closed', send_dict)
         except BrokenPipeError as err:
-            logging.error(f"PIPE BROKE CLOSING: {err}")
+            logging.error(f"_destroy PIPE BROKE CLOSING: {err}")
 
         logging.info(f"CLOSED {view_dict.webview}")
         view_dict.com_pipe.close()
@@ -991,9 +996,9 @@ class BrowserProc(Gtk.Application):
                 except TypeError:
                     data = self._fallback_search % data
             # Data looks like a uri but it doesn't start with
-            # somthing:// so prepend http:// to it.
+            # somthing:// so prepend https:// to it.
             if not data.startswith(('http://', 'https://', 'ftp://')):
-                data = f'http://{data}'
+                data = f'https://{data}'
 
             webview.load_uri(data)
 
@@ -1491,13 +1496,6 @@ class BrowserProc(Gtk.Application):
             return True
 
         return False
-
-    def _oldrun(self):
-        """ Run the main Gtk loop.
-
-        """
-
-        Gtk.main()
 
     def _terminated(self, webview: object, reason: object, view_dict: dict):
         """ Handle the crash

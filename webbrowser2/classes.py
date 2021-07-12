@@ -27,6 +27,7 @@ from gi import require_version as gi_require_version
 gi_require_version('Gtk', '3.0')
 from gi.repository import Gtk, GObject, GLib, Gio, WebKit2, Gdk, Pango
 import pathlib
+import shutil
 import logging
 import socket
 from json import loads as json_loads
@@ -1054,21 +1055,21 @@ class SettingsManager(Gtk.Grid):
         scroll.set_hexpand(True)
         scroll.set_vexpand(True)
 
-        clear_cache_button = Gtk.Button('Clear Cache')
-        clear_cache_button.set_tooltip_text('Clear All Cache Except HTML5 Databases.')
+        clear_cache_button = Gtk.Button('Clear Website Data')
+        clear_cache_button.set_tooltip_text('Clear All Cached Data Except HTML5 Databases.')
         clear_cache_button.connect('clicked',
                                    lambda btn: self.clear('cache'))
 
-        clear_cookies_button = Gtk.Button('Clear All Cookies')
-        clear_cookies_button.set_tooltip_text('Clear All Cookies')
-        clear_cookies_button.connect('clicked',
-                                     lambda btn: self.clear('cookies'))
+        # clear_cookies_button = Gtk.Button('Clear All Cookies')
+        # clear_cookies_button.set_tooltip_text('Clear All Cookies')
+        # clear_cookies_button.connect('clicked',
+        #                              lambda btn: self.clear('cookies'))
 
         self._clear_grid = Gtk.Grid()
         self._clear_grid.set_column_spacing(6)
         self._clear_grid.set_column_homogeneous(True)
-        self._clear_grid.attach(clear_cache_button, 0, 0, 1, 1)
-        self._clear_grid.attach(clear_cookies_button, 1, 0, 1, 1)
+        self._clear_grid.attach(clear_cache_button, 1, 0, 1, 1)
+        # self._clear_grid.attach(clear_cookies_button, 1, 0, 1, 1)
         self._clear_grid.show_all()
 
         self.set_row_spacing(6)
@@ -1283,20 +1284,40 @@ class SettingsManager(Gtk.Grid):
         """
 
         ctx = WebKit2.WebContext.get_default()
+        ctx.set_favicon_database_directory()
         data_manager = ctx.get_website_data_manager()
+        # print(data_manager.get_property('local-storage-directory'))
+
+        cache_dir = data_manager.get_property('disk-cache-directory')
+        cache_path = pathlib.Path(cache_dir)
+        favicon_dir = ctx.get_favicon_database_directory()
+        favicon_path = pathlib.Path(favicon_dir)
 
         if target in ['all', 'cookies']:
             logging.info('Clearing Cookies')
             # ctx.get_cookie_manager().delete_all_cookies()
-            data_manager.clear(WebKit2.WebsiteDataTypes.COOKIES, 0, None,
-                               self._clear_callback, None)
+            # data_manager.clear(WebKit2.WebsiteDataTypes.COOKIES, 0, None,
+            #                    self._clear_callback, None)
         if target in ['all', 'cache']:
-            logging.info('Clearing Cache')
-            ctx.clear_cache()
-            data_manager.clear(WebKit2.WebsiteDataTypes.ALL, 0, None, 
-                               self._clear_callback, None)
+            logging.info(f'Clearing favicon database in {ctx.get_favicon_database_directory()}')
             if ctx.get_favicon_database_directory():
                 ctx.get_favicon_database().clear()
+
+            if favicon_path.is_dir():
+                shutil.rmtree(favicon_path)
+
+            logging.info('Cleared favicon database')
+            logging.info('Clearing Cache')
+
+            ctx.clear_cache()
+
+            # Just delete the entire path to make sure it is gone.
+            if cache_path.is_dir():
+                shutil.rmtree(cache_path)
+
+            logging.info('Cleared Cache')
+            # data_manager.clear(WebKit2.WebsiteDataTypes.ALL, 0, None, 
+            #                    self._clear_callback, None)
 
     def _clear_callback(self, data_manager, res, user_data):
         """ Data Manager clear callback.

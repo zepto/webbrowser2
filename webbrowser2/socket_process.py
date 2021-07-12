@@ -47,7 +47,7 @@ from .classes import ContentFilterSettings, ContentFilterWhitelistSettings
 from .bookmarks import BookmarkMenu
 
 
-class MainWindow(object):
+class MainWindow(Gtk.Application):
     """ The main window.
 
     """
@@ -59,12 +59,16 @@ class MainWindow(object):
 
         """
 
+        super().__init__(application_id=f'org.webbrowser2.{profile}', flags=0)
+        GLib.set_prgname(f'org.webbrowser2.{profile}')
+
         self._is_closing = False
 
         self._profile = Profile(profile)
         self._socket = self._profile.open_socket(uri_list)
         if not self._socket:
             com_pipe.send(('quit', True))
+            self.quit()
             return None
 
         self._name = 'Web Browser'
@@ -136,8 +140,7 @@ class MainWindow(object):
                                  Gtk.AccelFlags.VISIBLE,
                                  self._switch_tab_key)
 
-        self._window = Gtk.Window()
-        self._window.set_title(self._name)
+        self._window = Gtk.ApplicationWindow(title=self._name)
         self._window.add_accel_group(self._accels)
         self._window.set_size_request(500, 540)
         self._window.set_default_size(self._profile.get('width', width),
@@ -290,6 +293,20 @@ class MainWindow(object):
 
         GLib.io_add_watch(self._socket.fileno(), GLib.IO_IN,
                           self._handle_extern_signal)
+
+    def do_activate(self):
+        """ Activate the app.
+
+        """
+
+        self.add_window(self._window)
+
+    def do_startup(self):
+        """ Start the gtk application.
+
+        """
+
+        Gtk.Application.do_startup(self)
 
     def _make_tab(self, uri: str = 'about:blank', focus: bool = False,
                   private: bool = True, index: int = -1):
@@ -624,18 +641,23 @@ class MainWindow(object):
         # Cancel all gio async functions.
         self._cancellable.cancel()
 
-        Gtk.main_quit()
+        # Close the window.
+        self._window.close()
+
         self._send('quit', True)
+
+        # Quit the main loop.
+        self.quit()
+
+    def do_shutdown(self):
+        """ Finish shutting down the application.
+
+        """
 
         # Close and remove the socket file.
         self._profile.close_socket()
 
-    def run(self):
-        """ Run Gtk.main()
-
-        """
-
-        if self._socket: Gtk.main()
+        Gtk.Application.do_shutdown(self)
 
     def _save_config(self):
         """ Save the config.
@@ -775,8 +797,11 @@ class MainWindow(object):
 
         if signal == 'load-status' and data == 0:
             window.address_entry.set_name('')
-            uri_str = '' if window.uri == 'about:blank' else window.uri
-            window.address_entry.set_text(uri_str)
+            if window.uri != 'about:blank':
+                uri_str = window.uri
+                window.address_entry.set_text(uri_str)
+            else:
+                uri_str = ''
             window.address_entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
                                              self._stop_icon)
             window.address_entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
@@ -796,7 +821,7 @@ class MainWindow(object):
 
         if signal == 'uri' and data:
             window['uri'] = data
-            window.address_entry.set_text('' if data == 'about:blank' else data)
+            if data != 'about:blank': window.address_entry.set_text(data)
 
         if signal == 'estimated-load-progress':
             window.address_entry.set_progress_fraction(data if data < 1 else 0)
