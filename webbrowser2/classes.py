@@ -317,6 +317,7 @@ class SettingsPopover(Gtk.Popover):
         super(SettingsPopover, self).__init__()
 
         self._tabs = Gtk.Notebook()
+        self._tabs.set_border_width(5)
         self._tabs.set_tab_pos(Gtk.PositionType.LEFT)
         self._tabs.show_all()
 
@@ -419,6 +420,7 @@ class DownloadManager(Gtk.Grid):
         progress_bar = Gtk.ProgressBar()
         progress_bar.set_margin_start(3)
         progress_bar.set_margin_end(12)
+        progress_bar.set_margin_bottom(5)
         progress_bar.set_halign(Gtk.Align.START)
         progress_bar.set_hexpand(True)
         progress_bar.set_show_text(True)
@@ -444,6 +446,7 @@ class DownloadManager(Gtk.Grid):
         cancel_button.set_relief(Gtk.ReliefStyle.NONE)
 
         download_grid = Gtk.Grid()
+        download_grid.set_border_width(5)
         download_grid.set_hexpand(True)
         download_grid.set_column_homogeneous(False)
         download_grid.attach(progress_bar, 0, 0, 1, 1)
@@ -455,6 +458,7 @@ class DownloadManager(Gtk.Grid):
         finish_label.set_halign(Gtk.Align.START)
         finish_label.set_ellipsize(Pango.EllipsizeMode.END)
         finish_label.set_margin_end(12)
+        finish_label.set_margin_start(10)
         finish_label.set_vexpand(True)
         finish_label.set_hexpand(True)
 
@@ -482,6 +486,7 @@ class DownloadManager(Gtk.Grid):
 
         finish_grid = Gtk.Grid()
         finish_grid.set_hexpand(True)
+        finish_grid.set_border_width(5)
         finish_grid.set_column_homogeneous(False)
         finish_grid.attach(finish_label_event, 0, 0, 1, 1)
         finish_grid.attach(open_button, 1, 0, 1, 1)
@@ -748,23 +753,22 @@ class SessionManager(Gtk.Grid):
                                         lambda button: self.restore_selected())
         self._restore_selected_button.set_sensitive(False)
 
-        self._restore_all_button = Gtk.Button('Restore All')
-        self._restore_all_button.set_tooltip_text('Restore all Sessions.')
-        self._restore_all_button.connect('clicked',
-                                   lambda button: self.restore_all())
-        self._restore_all_button.set_sensitive(False)
+        self._select_toggle_button = Gtk.Button('Select All')
+        self._select_toggle_button.set_tooltip_text('Select all Sessions.')
+        self._select_toggle_button.connect('clicked', self._select_toggle)
+        self._select_toggle_button.set_sensitive(False)
 
-        self._clear_button = Gtk.Button('Clear List')
-        self._clear_button.set_tooltip_text('Remove all Sessions.')
-        self._clear_button.connect('clicked', lambda button: self.clear())
-        self._clear_button.set_sensitive(False)
+        self._clear_selected_button = Gtk.Button('Clear Selected')
+        self._clear_selected_button.set_tooltip_text('Remove all selected Sessions.')
+        self._clear_selected_button.connect('clicked', lambda button: self.clear_selected())
+        self._clear_selected_button.set_sensitive(False)
 
         button_grid = Gtk.Grid()
         button_grid.set_column_spacing(6)
         button_grid.set_column_homogeneous(True)
-        button_grid.attach(self._restore_all_button, 0, 0, 1, 1)
+        button_grid.attach(self._select_toggle_button, 0, 0, 1, 1)
         button_grid.attach(self._restore_selected_button, 1, 0, 1, 1)
-        button_grid.attach(self._clear_button, 2, 0, 1, 1)
+        button_grid.attach(self._clear_selected_button, 2, 0, 1, 1)
         button_grid.set_halign(Gtk.Align.END)
 
         self.set_row_spacing(6)
@@ -861,8 +865,21 @@ class SessionManager(Gtk.Grid):
         self._sessions.clear()
         self._selected.clear()
 
-        self._restore_all_button.set_sensitive(False)
-        self._clear_button.set_sensitive(False)
+        self._select_toggle_button.set_sensitive(False)
+        self._clear_selected_button.set_sensitive(False)
+
+    def clear_selected(self):
+        """ Clear all sessions from list.
+
+        """
+
+        self._selected.sort(key=lambda i: i[0]['index'])
+        for session, button, grid in self._selected[:]:
+            button.set_active(False)
+            self._session_list.remove(grid.get_parent())
+            self._sessions.remove(session)
+
+        self._clear_selected_button.set_sensitive(False)
 
     def restore_all(self):
         """ Restore all sessions.
@@ -873,6 +890,24 @@ class SessionManager(Gtk.Grid):
             self.emit('restore-session', session)
 
         self.clear()
+
+    def _select_toggle(self, button):
+        """ Select all sessions.
+
+        """
+
+        self._session_list.foreach(self._session_foreach_callback, 
+                                   button.get_label() == 'Select All')
+
+    def _session_foreach_callback(self, session_row, data):
+        """ Do something with each child.
+
+        """
+
+        grid = session_row.get_children()[0]
+        for child in grid.get_children():
+            if type(child) != Gtk.CheckButton: continue
+            child.set_active(data)
 
     def restore_selected(self):
         """ Restore all the selected sessions.
@@ -928,6 +963,7 @@ class SessionManager(Gtk.Grid):
         remove_button.set_relief(Gtk.ReliefStyle.NONE)
 
         grid = Gtk.Grid()
+        grid.set_border_width(5)
         grid.attach(check_button, 0, 0, 1, 1)
         grid.attach(restore_button, 1, 0, 1, 1)
         grid.attach(remove_button, 2, 0, 1, 1)
@@ -1001,7 +1037,14 @@ class SessionManager(Gtk.Grid):
             self._selected.remove((session, button, grid))
 
         self._restore_selected_button.set_sensitive(bool(self._selected))
-        # self._clear_selected.set_sensitive(bool(self._selected))
+        self._clear_selected_button.set_sensitive(bool(self._selected))
+
+        if self._selected:
+            self._select_toggle_button.set_label('Unselect All')
+            self._select_toggle_button.set_tooltip_text('Unselect all Sessions.')
+        else:
+            self._select_toggle_button.set_label('Select All')
+            self._select_toggle_button.set_tooltip_text('Select all Sessions.')
 
     def _session_removed(self, listbox: object, widget: object, stack: object):
         """ Add a label if the listbox is empty.
@@ -1010,8 +1053,7 @@ class SessionManager(Gtk.Grid):
 
         if not listbox.get_children():
             stack.set_visible_child_name('empty')
-            self._restore_all_button.set_sensitive(False)
-            self._clear_button.set_sensitive(False)
+            self._select_toggle_button.set_sensitive(False)
             self._restore_selected_button.set_sensitive(False)
 
     def _session_added(self, listbox: object, widget: object, stack: object):
@@ -1020,8 +1062,7 @@ class SessionManager(Gtk.Grid):
         """
 
         stack.set_visible_child_name('sessions')
-        self._restore_all_button.set_sensitive(True)
-        self._clear_button.set_sensitive(True)
+        self._select_toggle_button.set_sensitive(True)
 
 
 class SettingsManager(Gtk.Grid):
@@ -1044,6 +1085,7 @@ class SettingsManager(Gtk.Grid):
         self._profile = profile
 
         self._settings_grid = Gtk.Grid()
+        self._settings_grid.set_border_width(15)
         self._settings_grid.set_row_spacing(3)
         self._settings_grid.set_vexpand(True)
         self._settings_grid.set_hexpand(True)
@@ -1210,6 +1252,7 @@ class SettingsManager(Gtk.Grid):
         spin_button.set_margin_start(3)
         spin_button.set_margin_top(3)
         spin_button.set_margin_bottom(3)
+        spin_button.set_margin_end(5)
         spin_button.set_hexpand(True)
         spin_button.set_value(value)
         spin_button.connect('value-changed', self._setting_changed,
