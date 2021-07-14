@@ -61,6 +61,7 @@ class MainWindow(Gtk.Application):
 
         super().__init__(application_id=f'org.webbrowser2.{profile}', flags=0)
         GLib.set_prgname(f'org.webbrowser2.{profile}')
+        GLib.set_application_name('Webbrowser2')
 
         self._is_closing = False
 
@@ -77,13 +78,8 @@ class MainWindow(Gtk.Application):
         self._sig_ids = []
         self._windows = {}
 
-        screen = Gdk.Screen.get_default()
-        width = screen.get_width() // 2
-        height = math.floor(screen.get_height() * 9 // 10)
-
         self._blank_gicon = Gio.ThemedIcon.new_with_default_fallbacks(
                 'text-x-generic-symbolic')
-
         self._stop_icon = Gio.ThemedIcon.new_with_default_fallbacks(
                 'process-stop-symbolic')
         self._refresh_icon = Gio.ThemedIcon.new_with_default_fallbacks(
@@ -139,6 +135,11 @@ class MainWindow(Gtk.Application):
                                  Gdk.ModifierType.MOD1_MASK,
                                  Gtk.AccelFlags.VISIBLE,
                                  self._switch_tab_key)
+
+
+        screen = Gdk.Screen.get_default()
+        width = screen.get_width() // 2
+        height = math.floor(screen.get_height() * 9 // 10)
 
         self._window = Gtk.ApplicationWindow(title=self._name)
         self._window.add_accel_group(self._accels)
@@ -587,32 +588,27 @@ class MainWindow(Gtk.Application):
 
         """
 
+        # Hide the window instead of destroying it, and use self.quit()
+        # when the last tab is closed.
+        self._window.hide()
+
         logging.info(f"DELETE EVENT: {event}")
 
-        if not event:
-            if self._is_closing:
-                # Save all open sessions before closing them.
-                self._session_manager.save_sessions()
-            self._session_manager.close()
-            # No event means that the tab-removed callback triggered
-            # this event, so destroy the window.
-            self._window.destroy()
-            return False
-        else:
-            # Disconnect some event handlers.
-            for widget, sig_id in self._sig_ids: widget.disconnect(sig_id)
+        # Disconnect some event handlers.
+        for widget, sig_id in self._sig_ids: widget.disconnect(sig_id)
 
-            self._session_manager.clear()
-            self._is_closing = True
+        self._session_manager.clear()
+        self._is_closing = True
 
-            # Just store the tab layout, and wait for the tab to close
-            # to store the session data.
-            for child in self._windows.values(): child.update_session({})
+        # Just store the tab layout, and wait for the tab to close
+        # to store the session data.
+        for child in self._windows.values(): child.update_session({})
 
-            logging.info("CLOSING ALL TABS")
+        logging.info("CLOSING ALL TABS")
 
-            # Send the close signal to all tabs.
-            for child in tuple(self._windows.values()): child.close()
+        # Send the close signal to all tabs to get them to send their
+        # session data so it can be saved when the application exits.
+        for child in self._windows.values(): child.close()
 
         logging.info(f'SOCKET PROCESS: Sent close to child')
 
@@ -621,12 +617,24 @@ class MainWindow(Gtk.Application):
         return True
 
     @save_config
-    def _destroy(self, window: object):
-        """ Quit
+    def _destroy(self, window):
+        """ Quite the application when the window is destroyed.
 
         """
 
-        logging.info("DESTROY")
+        self.quit()
+
+    @save_config
+    def do_shutdown(self):
+        """ Finish shutting down the application.
+
+        """
+
+        # Save the session only when the window was closed with the
+        # delete event.
+        if self._is_closing: self._session_manager.save_sessions()
+
+        self._session_manager.close()
 
         if self._profile.clear_on_exit:
             # Clear all cache and cookies.
@@ -641,18 +649,8 @@ class MainWindow(Gtk.Application):
         # Cancel all gio async functions.
         self._cancellable.cancel()
 
-        # Close the window.
-        self._window.close()
-
+        # Tell the main process that the main window is quitting.
         self._send('quit', True)
-
-        # Quit the main loop.
-        self.quit()
-
-    def do_shutdown(self):
-        """ Finish shutting down the application.
-
-        """
 
         # Close and remove the socket file.
         self._profile.close_socket()
@@ -896,6 +894,11 @@ class MainWindow(Gtk.Application):
 
         if signal == 'session-data':
             if not self._is_closing: window.update_session(data)
+
+        if signal == 'notification-clicked':
+            if data.get('focus-tab', False):
+                self._tabs.set_current_page(self._tabs.page_num(window.tab_grid))
+                self._window.present()
 
         return True
 
@@ -1631,7 +1634,8 @@ class MainWindow(Gtk.Application):
 
         if notebook.get_n_pages() == 0:
             logging.info("NO MORE PAGES, EXITING")
-            self._window.emit('delete-event', None)
+            # Finally destroy the window.
+            self._window.destroy()
 
     def _to_last_tab(self, child: object):
         """ Switch to the correct tab before closing.

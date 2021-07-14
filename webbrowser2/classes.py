@@ -1099,8 +1099,7 @@ class SettingsManager(Gtk.Grid):
 
         clear_cache_button = Gtk.Button('Clear Website Data')
         clear_cache_button.set_tooltip_text('Clear All Cached Data Except HTML5 Databases.')
-        clear_cache_button.connect('clicked',
-                                   lambda btn: self.clear('cache'))
+        clear_cache_button.connect('clicked', lambda btn: self.clear('all'))
 
         # clear_cookies_button = Gtk.Button('Clear All Cookies')
         # clear_cookies_button.set_tooltip_text('Clear All Cookies')
@@ -1333,6 +1332,7 @@ class SettingsManager(Gtk.Grid):
 
         cache_dir = data_manager.get_property('disk-cache-directory')
         cache_path = pathlib.Path(cache_dir)
+
         favicon_dir = ctx.get_favicon_database_directory()
         favicon_path = pathlib.Path(favicon_dir)
 
@@ -1342,25 +1342,24 @@ class SettingsManager(Gtk.Grid):
             # data_manager.clear(WebKit2.WebsiteDataTypes.COOKIES, 0, None,
             #                    self._clear_callback, None)
         if target in ['all', 'cache']:
-            logging.info(f'Clearing favicon database in {ctx.get_favicon_database_directory()}')
-            if ctx.get_favicon_database_directory():
-                ctx.get_favicon_database().clear()
+            logging.info(f'Clearing favicon database in {favicon_path}')
 
             if favicon_path.is_dir():
-                shutil.rmtree(favicon_path)
+                ctx.get_favicon_database().clear()
+                for f in favicon_path.rglob('*'): f.unlink(missing_ok=True)
 
             logging.info('Cleared favicon database')
-            logging.info('Clearing Cache')
 
+            logging.info(f'Clearing Cache from {cache_path}')
             ctx.clear_cache()
+            # data_manager.clear(WebKit2.WebsiteDataTypes.ALL, 0, None, 
+            #                    self._clear_callback, None)
 
             # Just delete the entire path to make sure it is gone.
             if cache_path.is_dir():
-                shutil.rmtree(cache_path)
+                shutil.rmtree(cache_path, ignore_errors=True)
 
             logging.info('Cleared Cache')
-            # data_manager.clear(WebKit2.WebsiteDataTypes.ALL, 0, None, 
-            #                    self._clear_callback, None)
 
     def _clear_callback(self, data_manager, res, user_data):
         """ Data Manager clear callback.

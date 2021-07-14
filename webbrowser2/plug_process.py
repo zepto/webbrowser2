@@ -37,7 +37,8 @@ from multiprocessing import current_process
 from gi import require_version as gi_require_version
 gi_require_version('Gtk', '3.0')
 gi_require_version('WebKit2', '4.0')
-from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio
+gi_require_version('GLib', '2.0')
+from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GObject
 
 from .functions import looks_like_uri
 from .classes import ChildDict
@@ -402,6 +403,7 @@ class BrowserProc(Gtk.Application):
                 ('resource-load-started', self._resource_started, view_dict),
                 ('context-menu', self._context_menu, view_dict),
                 ('web-process-terminated', self._terminated, view_dict),
+                ('show-notification', self._show_notification, view_dict),
                 )
 
         for signal, func, *args in signal_handlers:
@@ -563,6 +565,13 @@ class BrowserProc(Gtk.Application):
         logging.info(f"CLOSED {view_dict.webview}")
         view_dict.com_pipe.close()
         view_dict.clear()
+
+    def do_shutdown(self):
+        """ Finish shutting down the application.
+
+        """
+
+        Gtk.Application.do_shutdown(self)
 
     def _recieve(self, source: int, cb_condition: int, view_dict: dict):
         """ Recieve signals from outside.
@@ -1072,12 +1081,46 @@ class BrowserProc(Gtk.Application):
                 logging.info(f"INSECURE RESOURCE: {uri}")
                 view_dict.send('insecure-content', True)
 
+    def _show_notification(self, webview: object, notification: object,
+                           view_dict: dict):
+        """ Show the notification and connect to the signal handlers.
+
+        """
+
+        def notification_clicked(notify, data):
+            """ send the notification clicked message to the main window.
+
+            """
+
+            view_dict.send('notification-clicked', {'focus-tab': True})
+
+        notification.connect('clicked', notification_clicked, None)
+
+        return False
+
     def _permission(self, webview: object, request: object, view_dict: dict):
         """ Grant or deny permission for request.
 
         """
 
         logging.info(f"PERMISSION: {request}")
+        if type(request) == WebKit2.NotificationPermissionRequest:
+            msgbox = Gtk.MessageDialog(transient_for=view_dict.plug,
+                                       flags=Gtk.DialogFlags.MODAL,
+                                       message_type=Gtk.MessageType.QUESTION,
+                                       buttons=Gtk.ButtonsType.YES_NO,
+                                       text='Permission Request')
+            msgbox.format_secondary_text(f'Allow {webview.get_uri()} to show desktop notifications?')
+            msgbox.set_keep_above(True)
+            msgbox.set_decorated(False)
+            result = msgbox.run()
+            if result == Gtk.ResponseType.YES:
+                request.allow()
+            elif result == Gtk.ResponseType.NO:
+                request.deny()
+            msgbox.destroy()
+            return True
+
         request.deny()
         return True
 
