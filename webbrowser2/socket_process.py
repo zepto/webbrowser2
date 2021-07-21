@@ -19,46 +19,30 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-""" Socket process
+"""Socket process."""
 
-"""
-
-import os
-import sys
-import re
+from .bookmarks import BookmarkMenu
+from .functions import looks_like_uri
 import math
-import pathlib
-import socket
 import logging
-from multiprocessing import Manager, Pipe
+from multiprocessing import Pipe
 from json import loads as json_loads
-from json import dumps as json_dumps
-
 from gi import require_version as gi_require_version
 gi_require_version('Gtk', '3.0')
 gi_require_version('WebKit2', '4.0')
 from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GdkPixbuf
-
-from .functions import looks_like_uri, get_config_path, save_dialog
-from .classes import ChildDict, Profile, SettingsPopover, SearchSettings
-from .classes import SettingsManager, SessionManager, DownloadManager
-from .classes import AgentSettings, AdBlockSettings, MediaFilterSettings
 from .classes import ContentFilterSettings, ContentFilterWhitelistSettings
-from .bookmarks import BookmarkMenu
+from .classes import AgentSettings, AdBlockSettings, MediaFilterSettings
+from .classes import SettingsManager, SessionManager, DownloadManager
+from .classes import ChildDict, Profile, SettingsPopover, SearchSettings
 
 
 class MainWindow(Gtk.Application):
-    """ The main window.
-
-    """
+    """The main window."""
 
     def __init__(self, com_pipe: object, uri_list: list = ['about:blank'],
                  profile: str = 'default'):
-        """ Initialize the process.
-
-
-        """
-
+        """Initialize the process."""
         super().__init__(application_id=f'org.webbrowser2.{profile}', flags=0)
         GLib.set_prgname(f'org.webbrowser2.{profile}')
         GLib.set_application_name('Webbrowser2')
@@ -79,18 +63,19 @@ class MainWindow(Gtk.Application):
         self._windows = {}
 
         self._blank_gicon = Gio.ThemedIcon.new_with_default_fallbacks(
-                'text-x-generic-symbolic')
+            'text-x-generic-symbolic')
         self._stop_icon = Gio.ThemedIcon.new_with_default_fallbacks(
-                'process-stop-symbolic')
+            'process-stop-symbolic')
         self._refresh_icon = Gio.ThemedIcon.new_with_default_fallbacks(
-                'view-refresh-symbolic')
+            'view-refresh-symbolic')
         self._go_icon = Gio.ThemedIcon.new_with_default_fallbacks(
-                'go-jump-symbolic')
+            'go-jump-symbolic')
         self._find_icon = Gio.ThemedIcon.new_with_default_fallbacks(
-                'edit-find-symbolic')
+            'edit-find-symbolic')
 
         css_provider = Gtk.CssProvider.new()
-        css_provider.load_from_data(b'''
+        css_provider.load_from_data(
+            b'''
                 #not-found {
                     background: #ff5555;
                 }
@@ -103,27 +88,34 @@ class MainWindow(Gtk.Application):
                 #insecure {
                     border-color: #E2A564;
                 }
-               ''')
-        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(),
-                                                 css_provider,
-                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            '''
+        )
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
         self._accels = Gtk.AccelGroup()
 
         accel_dict = {
-                ('<Ctrl>t', '<Control><Alt>t', '<Ctrl><Shift>t'): self._new_tab,
-                ('<Ctrl>w', '<Control><Alt>w'): self._close_tab_key,
-                ('<Ctrl><Alt>r',): lambda *a: com_pipe.send(('refresh', True)),
-                ('<Ctrl>l',): self._focus_address_entry_key,
-                ('<Ctrl>m',): lambda *a: self._minimize_tab(self._get_child_dict()),
-                ('<Ctrl>h',): lambda *a: self._hide_tab(self._get_child_dict()),
-                ('<Ctrl>f',): self._findbar_toggle,
-                ('<Ctrl>d',): lambda *a: self._bookmark_menu.bookmark_page(),
-                ('<Ctrl>y',): self._yank_hover,
-                ('<Ctrl>g', '<Ctrl><Shift>g'): self._find_next_key,
-                ('Escape',): self._escape,
-                ('<Ctrl>r', 'F5'): lambda *a: self._get_child_dict().send('refresh', True),
-                }
+            ('<Ctrl>t', '<Control><Alt>t', '<Ctrl><Shift>t'): self._new_tab,
+            ('<Ctrl>w', '<Control><Alt>w'): self._close_tab_key,
+            ('<Ctrl><Alt>r',): lambda *a: com_pipe.send(('refresh', True)),
+            ('<Ctrl>l',): self._focus_address_entry_key,
+            ('<Ctrl>m',): lambda *a: self._minimize_tab(
+                self._get_child_dict()),
+            ('<Ctrl>h',): lambda *a: self._hide_tab(self._get_child_dict()),
+            ('<Ctrl>f',): self._findbar_toggle,
+            ('<Ctrl>d',): lambda *a: self._bookmark_menu.bookmark_page(),
+            ('<Ctrl>y',): self._yank_hover,
+            ('<Ctrl>g', '<Ctrl><Shift>g'): self._find_next_key,
+            ('Escape',): self._escape,
+            ('<Ctrl>r', 'F5'): lambda *a: self._get_child_dict().send(
+                'refresh',
+                True
+            ),
+        }
         for accel_tup, func in accel_dict.items():
             for accel in accel_tup:
                 keyval, modifier = Gtk.accelerator_parse(accel)
@@ -153,6 +145,16 @@ class MainWindow(Gtk.Application):
         self._window.connect('delete-event', self._delete_event)
         self._window.connect('size-allocate', self._size_allocate)
         self._window.connect('window-state-event', self._state_event)
+        self._window.set_border_width(1)
+
+        header_bar = Gtk.HeaderBar()
+        header_bar.set_show_close_button(True)
+        header_bar.set_has_subtitle(False)
+        header_bar.props.title = self._name
+        # self._window.set_titlebar(header_bar)
+        # icon = Gio.ThemedIcon.new_with_default_fallbacks('web-browser')
+        # new_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
+        # header_bar.pack_start(new_img)
 
         icon = Gio.ThemedIcon.new_with_default_fallbacks('tab-new-symbolic')
         new_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
@@ -169,7 +171,8 @@ class MainWindow(Gtk.Application):
         self._agent_settings = AgentSettings(self._profile.user_agents,
                                              self._window)
         self._agent_settings.set_default(self._profile.default_user_agent)
-        self._agent_settings.connect('default-changed', self._default_agent_changed)
+        self._agent_settings.connect(
+            'default-changed', self._default_agent_changed)
         self._agent_settings.connect('changed', lambda *a: self._save_config())
         self._agent_settings.connect('added', lambda *a: self._save_config())
         self._agent_settings.connect('removed', lambda *a: self._save_config())
@@ -177,46 +180,51 @@ class MainWindow(Gtk.Application):
         self._search_settings = SearchSettings(self._profile.search,
                                                self._window)
         self._search_settings.set_default(self._profile.default_search)
-        self._search_settings.connect('default-changed', self._default_search_changed)
-        self._search_settings.connect('changed', lambda *a: self._save_config())
+        self._search_settings.connect(
+            'default-changed', self._default_search_changed)
+        self._search_settings.connect(
+            'changed', lambda *a: self._save_config())
         self._search_settings.connect('added', lambda *a: self._save_config())
-        self._search_settings.connect('removed', lambda *a: self._save_config())
+        self._search_settings.connect(
+            'removed', lambda *a: self._save_config())
 
-        self._adblock_settings = AdBlockSettings(self._profile.adblock,
-                                                 self._window)
+        self._adblock_settings = AdBlockSettings(
+            self._profile.adblock, self._window)
         self._adblock_settings.connect('set-active', self._adblock_set_active)
 
-        self._media_filter_settings = MediaFilterSettings(self._profile.media_filters,
-                                                          self._window)
+        self._media_filter_settings = MediaFilterSettings(
+            self._profile.media_filters, self._window)
         self._media_filter_settings.connect('set-active',
                                             self._media_filter_set_active)
 
-        self._content_filter_settings = ContentFilterSettings(self._profile.content_filters,
-                                                      self._window)
-        self._content_filter_settings.connect('set-active',
-                                              self._content_filter_set_active)
-        self._content_filter_settings.connect('removed',
-                                              self._content_filter_removed)
+        self._content_filter_settings = ContentFilterSettings(
+            self._profile.content_filters, self._window)
+        self._content_filter_settings.connect(
+            'set-active', self._content_filter_set_active)
+        self._content_filter_settings.connect(
+            'removed', self._content_filter_removed)
 
-        self._content_filter_whitelist_settings = ContentFilterWhitelistSettings(self._profile.content_filter_whitelist,
-                                                      self._window)
-        self._content_filter_whitelist_settings.connect('set-active',
-                                              self._content_filter_whitelist_set_active)
+        self._content_filter_whitelist_settings = ContentFilterWhitelistSettings(
+            self._profile.content_filter_whitelist, self._window)
+        self._content_filter_whitelist_settings.connect(
+            'set-active', self._content_filter_whitelist_set_active)
 
         self._settings_manager = SettingsManager(self._profile)
         self._settings_manager.add_custom_setting(self._agent_settings)
         self._settings_manager.add_custom_setting(self._search_settings)
         self._settings_manager.add_custom_setting(self._adblock_settings)
         self._settings_manager.add_custom_setting(self._media_filter_settings)
-        self._settings_manager.add_custom_setting(self._content_filter_settings)
-        self._settings_manager.add_custom_setting(self._content_filter_whitelist_settings)
+        self._settings_manager.add_custom_setting(
+            self._content_filter_settings)
+        self._settings_manager.add_custom_setting(
+            self._content_filter_whitelist_settings)
         self._settings_manager.show_clear_buttons(True)
         self._settings_manager.connect('setting-changed',
                                        self._settings_changed)
 
         self._session_manager = SessionManager(self._profile)
-        self._session_manager.connect('restore-session',
-                                      self._restore_session_cb)
+        self._session_manager.connect(
+            'restore-session', self._restore_session_cb)
 
         self._download_manager = DownloadManager(self._window)
 
@@ -238,6 +246,8 @@ class MainWindow(Gtk.Application):
         end_action_box.attach(menu_button, 0, 0, 1, 1)
         end_action_box.show_all()
 
+        # header_bar.pack_end(end_action_box)
+
         self._tabs = Gtk.Notebook()
         self._tabs.popup_enable()
         self._tabs.set_action_widget(start_action_box, Gtk.PackType.START)
@@ -245,9 +255,15 @@ class MainWindow(Gtk.Application):
         self._tabs.add_events(Gdk.EventMask.SCROLL_MASK)
         self._tabs.connect('page-reordered', self._tab_reordered)
         self._tabs.connect('page-removed', self._tab_removed)
-        self._sig_ids.append((self._tabs,
-                             self._tabs.connect('switch-page',
-                                                self._tab_switched)))
+        self._sig_ids.append(
+            (
+                self._tabs,
+                self._tabs.connect(
+                    'switch-page',
+                    self._tab_switched
+                )
+            )
+        )
         self._tabs.connect('scroll-event', self._tab_scrolled)
         self._tabs.set_scrollable(True)
         self._tabs.set_show_tabs(True)
@@ -258,8 +274,10 @@ class MainWindow(Gtk.Application):
         self._window.add(window_grid)
         self._window.show_all()
 
-        self._bookmark_menu = BookmarkMenu(self._profile.bookmarks_file, self._window)
-        self._bookmark_menu.connect('bookmark-release-event', self._bookmark_release)
+        self._bookmark_menu = BookmarkMenu(
+            self._profile.bookmarks_file, self._window)
+        self._bookmark_menu.connect(
+            'bookmark-release-event', self._bookmark_release)
         self._bookmark_menu.connect('open-folder', self._bookmark_open_folder)
         self._bookmark_menu.connect('new-bookmark', self._bookmark_new)
         self._bookmark_menu.connect('tab-list', self._bookmark_tab_list)
@@ -275,7 +293,8 @@ class MainWindow(Gtk.Application):
         self._reader_css = self._profile.get_file('reader.css')
 
         filter_path = self._profile.get_path('content-filters')
-        self._content_filter_store = WebKit2.UserContentFilterStore.new(filter_path)
+        self._content_filter_store = WebKit2.UserContentFilterStore.new(
+            filter_path)
 
         self._home_uri = self._profile.home_uri
 
@@ -296,61 +315,52 @@ class MainWindow(Gtk.Application):
                           self._handle_extern_signal)
 
     def do_activate(self):
-        """ Activate the app.
-
-        """
-
+        """Activate the app."""
         self.add_window(self._window)
 
     def do_startup(self):
-        """ Start the gtk application.
-
-        """
-
+        """Start the gtk application."""
         Gtk.Application.do_startup(self)
 
     def _make_tab(self, uri: str = 'about:blank', focus: bool = False,
                   private: bool = True, index: int = -1):
-        """ Make a tab.
-
-        """
-
+        """Make a tab."""
         main_pipe, child_pipe = Pipe()
-        socket_id, child = self._add_tab(main_pipe, child_pipe, focus, uri=uri,
-                                         index=index, private=private)
+        socket_id, child = self._add_tab(
+            main_pipe,
+            child_pipe,
+            focus,
+            uri=uri,
+            index=index,
+            private=private
+        )
 
         init_dict = {
-                'profile-path': self._profile._config_path,
-                'uri': uri,
-                'private': private,
-                'web-view-settings': self._profile.web_view_settings,
-                'search-url': self._search_settings.get_default(),
-                'user-agent': self._agent_settings.get_default(),
-                'adblock-filters': self._profile.adblock,
-                'media-filters': self._profile.media_filters,
-                'content-filters': self._profile.content_filters,
-                'content-filters-path': self._profile.get_path('content-filters'),
-                'content-filter-whitelist': self._profile.content_filter_whitelist,
-                'com-pipe': child_pipe,
-                'socket-id': socket_id,
-                'reader-js': self._reader_js,
-                'reader-css': self._reader_css,
-                'user-stylesheet': self._user_stylesheet,
-                'enable-user-stylesheet': self._profile.enable_user_stylesheet,
-                }
+            'profile-path': self._profile._config_path,
+            'uri': uri,
+            'private': private,
+            'web-view-settings': self._profile.web_view_settings,
+            'search-url': self._search_settings.get_default(),
+            'user-agent': self._agent_settings.get_default(),
+            'adblock-filters': self._profile.adblock,
+            'media-filters': self._profile.media_filters,
+            'content-filters': self._profile.content_filters,
+            'content-filters-path': self._profile.get_path('content-filters'),
+            'content-filter-whitelist': self._profile.content_filter_whitelist,
+            'com-pipe': child_pipe,
+            'socket-id': socket_id,
+            'reader-js': self._reader_js,
+            'reader-css': self._reader_css,
+            'user-stylesheet': self._user_stylesheet,
+            'enable-user-stylesheet': self._profile.enable_user_stylesheet,
+        }
 
         return init_dict, child
 
     def save_config(func):
-        """ Wrap button release events.
-
-        """
-
+        """Wrap button release events."""
         def wrapper(self, *args, **kwargs):
-            """ Call func only if the mouse is still over widget.
-
-            """
-
+            """Call func only if the mouse is still over widget."""
             return_val = func(self, *args, **kwargs)
             self._save_config()
             return return_val
@@ -360,10 +370,7 @@ class MainWindow(Gtk.Application):
     @save_config
     def _settings_changed(self, settings_manager: object, setting: str,
                           value: object):
-        """ Send the changes to all children processes.
-
-        """
-
+        """Send the changes to all children processes."""
         if setting == 'hide-address-bar':
             for child in self._windows.values():
                 if value:
@@ -381,54 +388,39 @@ class MainWindow(Gtk.Application):
 
     @save_config
     def _default_agent_changed(self, agent_settings: object, agent: str):
-        """ Set the default search engine.
-
-        """
-
+        """Set the default search engine."""
         self._send_all('web-view-settings', ('user-agent', agent))
 
     @save_config
     def _default_search_changed(self, search_settings: object, uri: str):
-        """ Set the default search engine.
-
-        """
-
+        """Set the default search engine."""
         self._send_all('default-search', uri)
 
     @save_config
     def _adblock_set_active(self, adblock_settings: object, name: str,
                             data: str, active: bool):
-        """ Change adblock.
-
-        """
-
+        """Change adblock."""
         self._send_all('adblock', (name, data, active))
 
     @save_config
     def _media_filter_set_active(self, media_filter_settings: object,
                                  name: str, data: str, active: bool):
-        """ Send media filter settings.
-
-        """
-
+        """Send media filter settings."""
         self._send_all('media-filter', (name, data, active))
 
     def _content_filter_removed(self, content_filter_settings: object,
                                 filter_id: str, uri: str):
-        """ Remove content filter.
-
-        """
-
-        self._content_filter_store.remove(filter_id, self._cancellable,
-                                          self._filter_remove_callback,
-                                          filter_id)
+        """Remove content filter."""
+        self._content_filter_store.remove(
+            filter_id,
+            self._cancellable,
+            self._filter_remove_callback,
+            filter_id
+        )
 
     def _filter_remove_callback(self, content_filter_store: object,
                                 result: object, filter_id: str):
-        """ Finishes removing the content filter.
-
-        """
-
+        """Finishes removing the content filter."""
         removed = content_filter_store.remove_finish(result)
         logging.info(f'SOCKET: Filter "{filter_id}" Removed: {removed}')
 
@@ -436,23 +428,22 @@ class MainWindow(Gtk.Application):
     def _content_filter_set_active(self, content_filter_settings: object,
                                    name: str = None, data: str = None,
                                    active: bool = False):
-        """ Send the content filter.
-
-        """
-
+        """Send the content filter."""
         filter_tuple = (name, data, active) if name else None
 
-        self._content_filter_store.fetch_identifiers(self._cancellable,
-                                                     self._filter_fetch_callback,
-                                                     filter_tuple)
+        self._content_filter_store.fetch_identifiers(
+            self._cancellable,
+            self._filter_fetch_callback,
+            filter_tuple
+        )
 
     def _filter_fetch_callback(self, content_filter_store: object,
                                result: object, filter_tuple: tuple):
-        """ Finishes fetching the content filter and adds it to the content
+        """Content filter fetch callback.
+
+        Finishes fetching the content filter and adds it to the content
         manager.
-
         """
-
         id_list = content_filter_store.fetch_identifiers_finish(result)
 
         if filter_tuple:
@@ -464,56 +455,47 @@ class MainWindow(Gtk.Application):
             else:
                 self._save_filter(content_filter_store, filter_tuple)
         else:
-            for filter_id, (uri, active) in self._profile.content_filters.items():
+            content_filter_items = self._profile.content_filters.items()
+            for filter_id, (uri, active) in content_filter_items:
                 logging.info(f"SOCKET: {filter_id=}, {uri=}, {active=}")
 
                 if filter_id not in id_list and active:
-                    self._save_filter(content_filter_store,
-                                      (filter_id, uri, active))
+                    self._save_filter(
+                        content_filter_store,
+                        (filter_id, uri, active)
+                    )
 
     def _save_filter(self, content_filter_store: object, filter_tuple: tuple):
-        """ Save the filter.
-
-        """
-
+        """Save the filter."""
         filter_id, uri, active = filter_tuple
 
         if (uri_file := self._profile._config_path.joinpath(uri)).is_file():
             uri = uri_file.as_uri()
 
         filter_file = Gio.File.new_for_uri(uri)
-        content_filter_store.save_from_file(filter_id, filter_file,
-                                            self._cancellable,
-                                            self._filter_save_callback,
-                                            filter_tuple)
+        content_filter_store.save_from_file(
+            filter_id,
+            filter_file,
+            self._cancellable,
+            self._filter_save_callback,
+            filter_tuple
+        )
 
     def _filter_save_callback(self, content_filter_store: object,
                               result: object, filter_tuple: tuple):
-        """ Finishes saving the content filter.
-
-        """
-
+        """Finishes saving the content filter."""
         if content_filter_store.save_finish(result):
             self._send_all('content-filter', filter_tuple)
 
     @save_config
-    def _content_filter_whitelist_set_active(self,
-                                             content_filter_whitelist_settings: object,
-                                             name: str = None,
-                                             data: str = None,
-                                             active: bool = False):
-        """ Send the content filter.
-
-        """
-
+    def _content_filter_whitelist_set_active(self, _, name: str = None, data:
+                                             str = None, active: bool = False):
+        """Send the content filter."""
         self._send_all('content-filter-whitelist', (name, data, active))
 
     @save_config
     def _size_allocate(self, window: object, allocation: object):
-        """ Save the window size.
-
-        """
-
+        """Save the window size."""
         width, height = window.get_size()
         self._profile['width'] = width
         self._profile['height'] = height
@@ -521,20 +503,17 @@ class MainWindow(Gtk.Application):
         return False
 
     def _state_event(self, window: object, event: object):
-        """ Save state.
-
-        """
-
+        """Save state."""
         if event.new_window_state & Gdk.WindowState.TILED:
             state = Gdk.WindowState.TILED
         return False
 
     def _close_wait(self, child: dict) -> bool:
-        """ Check if the child is still running.  If it is not running remove
-        the tab.
+        """Wait for child to top before removing the tab.
 
+        Check if the child is still running.  If it is not running remove the
+        tab.
         """
-
         self._send('refresh', True)
         self._send('is-alive', child.pid)
         signal, is_alive = self._recv()
@@ -543,10 +522,7 @@ class MainWindow(Gtk.Application):
         return False
 
     def _close_child(self, child: dict) -> bool:
-        """ Close a tab.
-
-        """
-
+        """Close a tab."""
         # Do not try to close more than once.
         if child.closing: return True
 
@@ -567,10 +543,7 @@ class MainWindow(Gtk.Application):
         return True
 
     def _remove_tab(self, child: dict):
-        """ Remove the tab and close its pipe.
-
-        """
-
+        """Remove the tab and close its pipe."""
         # Remove the io watch for child.
         GLib.Source.remove(child['event-source-id'])
 
@@ -584,10 +557,7 @@ class MainWindow(Gtk.Application):
         logging.info('CLEAR')
 
     def _delete_event(self, window: object, event: object):
-        """ Try to close all tabs first.
-
-        """
-
+        """Try to close all tabs first."""
         # Hide the window instead of destroying it, and use self.quit()
         # when the last tab is closed.
         self._window.hide()
@@ -618,18 +588,12 @@ class MainWindow(Gtk.Application):
 
     @save_config
     def _destroy(self, window):
-        """ Quite the application when the window is destroyed.
-
-        """
-
+        """Quite the application when the window is destroyed."""
         self.quit()
 
     @save_config
     def do_shutdown(self):
-        """ Finish shutting down the application.
-
-        """
-
+        """Finish shutting down the application."""
         # Save the session only when the window was closed with the
         # delete event.
         if self._is_closing: self._session_manager.save_sessions()
@@ -658,10 +622,7 @@ class MainWindow(Gtk.Application):
         Gtk.Application.do_shutdown(self)
 
     def _save_config(self):
-        """ Save the config.
-
-        """
-
+        """Save the config."""
         self._profile['search'] = self._search_settings.get_all()
         self._profile['default-search'] = self._search_settings.get_default_name()
         self._profile['user-agents'] = self._agent_settings.get_all()
@@ -669,18 +630,12 @@ class MainWindow(Gtk.Application):
         self._profile.save_config()
 
     def _restore_session_cb(self, session_manager: object, session: dict):
-        """ Restore session.
-
-        """
-
+        """Restore session."""
         self._main_popover.hide()
         self._restore_session(session)
 
     def _restore_session(self, session: dict):
-        """ Restore the sessons in sessions.
-
-        """
-
+        """Restore the sessons in sessions."""
         if not session: return False
 
         pid = session.get('pid', 0)
@@ -706,33 +661,28 @@ class MainWindow(Gtk.Application):
         return True
 
     def _update_session(self, child: dict, session_data: bytes = {}) -> dict:
-        """ Return a dictionary of session information for child.
-
-        """
-
+        """Return a dictionary of session information for child."""
         child.session_dict = {
-                'session-data': session_data,
-                'index': self._tabs.page_num(child.tab_grid),
-                'state': child.state,
-                'pid': child.pid,
-                'private': child.private,
-                'focus': child.focus,
-                'title': child.title,
-                'uri': child.uri,
-                'order': child.order,
-                }
+            'session-data': session_data,
+            'index': self._tabs.page_num(child.tab_grid),
+            'state': child.state,
+            'pid': child.pid,
+            'private': child.private,
+            'focus': child.focus,
+            'title': child.title,
+            'uri': child.uri,
+            'order': child.order,
+        }
 
         return child.session_dict
 
     def _callback(self, source: int, cb_condition: int, window: dict):
-        """ Handle each window.
-
-        """
-
+        """Handle each window."""
         try:
             signal, data = window.recv()
         except TypeError as err:
-            logging.error(f'{source} {cb_condition} socket_process _callback {err} for {window}')
+            logging.error(f'{source} {cb_condition} socket_process '
+                          f'_callback {err} for {window}')
             return True
 
         debug_list = ['mouse-motion', 'back-forward-list', 'can-go-back',
@@ -800,20 +750,20 @@ class MainWindow(Gtk.Application):
                 window.address_entry.set_text(uri_str)
             else:
                 uri_str = ''
-            window.address_entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
-                                             self._stop_icon)
-            window.address_entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                                 'Stop loading page.')
+            window.address_entry.set_icon_from_gicon(
+                Gtk.EntryIconPosition.SECONDARY, self._stop_icon)
+            window.address_entry.set_icon_tooltip_text(
+                Gtk.EntryIconPosition.SECONDARY, 'Stop loading page.')
             window.icon_stack.set_visible_child_name('spinner')
             window.icon_stack.get_child_by_name('spinner').start()
             window.insecure_content = False
         elif signal == 'load-status' and data == 3:
             entry = window.address_entry
             entry.set_progress_fraction(0)
-            entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
-                                      self._refresh_icon)
-            entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                               'Reload current address.')
+            entry.set_icon_from_gicon(
+                Gtk.EntryIconPosition.SECONDARY, self._refresh_icon)
+            entry.set_icon_tooltip_text(
+                Gtk.EntryIconPosition.SECONDARY, 'Reload current address.')
             window.icon_stack.set_visible_child_name('icon')
             window.icon_stack.get_child_by_name('spinner').stop()
 
@@ -889,24 +839,22 @@ class MainWindow(Gtk.Application):
             if not self._is_closing: window.update_session(data)
 
         if signal == 'download':
-            self._download_manager.new_download(data['uri'],
-                                                start=data.get('start', True))
+            self._download_manager.new_download(
+                data['uri'], start=data.get('start', True))
 
         if signal == 'session-data':
             if not self._is_closing: window.update_session(data)
 
         if signal == 'notification-clicked':
             if data.get('focus-tab', False):
-                self._tabs.set_current_page(self._tabs.page_num(window.tab_grid))
+                self._tabs.set_current_page(
+                    self._tabs.page_num(window.tab_grid))
                 self._window.present()
 
         return True
 
     def _recieve(self, source: int, cb_condition: int):
-        """ Recieve signals from outside.
-
-        """
-
+        """Recieve signals from outside."""
         signal, data = self._pipe.recv()
         logging.info(f'RECIEVE: {signal} => {data}')
 
@@ -916,10 +864,7 @@ class MainWindow(Gtk.Application):
         return True
 
     def _update_title(self, child: dict):
-        """ Update the window title.
-
-        """
-
+        """Update the window title."""
         child.title_str = f'{child.title} (pid: {child.pid}) {child.private_str}'
         child.label.set_text(child.title_str)
         child.event_box.set_tooltip_text(child.title_str)
@@ -934,17 +879,11 @@ class MainWindow(Gtk.Application):
         self._tabs.set_menu_label(child.tab_grid, label)
 
     def _send(self, signal: str, data: object):
-        """ Send signal and data using the main pipe.
-
-        """
-
+        """Send signal and data using the main pipe."""
         self._pipe.send((signal, data))
 
     def _send_all(self, signal: str, data: object):
-        """ Send a signal to all child processes.
-
-        """
-
+        """Send a signal to all child processes."""
         for child in self._windows.values():
             try:
                 child.send(signal, data)
@@ -954,10 +893,7 @@ class MainWindow(Gtk.Application):
     def _add_tab(self, com_pipe: object, child_pipe: object,
                  focus: bool = False, uri: str = 'about:blank',
                  index: int = -1, private: bool = True):
-        """ Add Tab.
-
-        """
-
+        """Add Tab."""
         child = ChildDict()
 
         find_entry = Gtk.Entry()
@@ -977,12 +913,15 @@ class MainWindow(Gtk.Application):
         item_box = Gtk.Grid()
         item_box.get_style_context().add_class('linked')
         item_box.attach(find_entry, 0, 0, 1, 1)
-        item_box.attach_next_to(find_prev, find_entry, Gtk.PositionType.RIGHT, 1, 1)
-        item_box.attach_next_to(find_next, find_prev, Gtk.PositionType.RIGHT, 1, 1)
+        item_box.attach_next_to(find_prev, find_entry,
+                                Gtk.PositionType.RIGHT, 1, 1)
+        item_box.attach_next_to(find_next, find_prev,
+                                Gtk.PositionType.RIGHT, 1, 1)
         box_item = Gtk.ToolItem()
         box_item.add(item_box)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('window-close-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'window-close-symbolic')
         btn_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         find_close = Gtk.Button()
@@ -1005,17 +944,17 @@ class MainWindow(Gtk.Application):
         address_entry.set_tooltip_text('Enter address or search string')
         address_entry.set_placeholder_text("Enter address or search string")
         entry_icons = (
-                (
-                    'user-bookmarks-symbolic',
-                    Gtk.EntryIconPosition.PRIMARY,
-                    'Open bookmark menu.',
-                ),
-                (
-                    'go-jump-symbolic',
-                    Gtk.EntryIconPosition.SECONDARY,
-                    'Go to address or search for address bar text.',
-                )
-                )
+            (
+                'user-bookmarks-symbolic',
+                Gtk.EntryIconPosition.PRIMARY,
+                'Open bookmark menu.',
+            ),
+            (
+                'go-jump-symbolic',
+                Gtk.EntryIconPosition.SECONDARY,
+                'Go to address or search for address bar text.',
+            )
+        )
 
         for icon_name, pos, tooltip in entry_icons:
             icon = Gio.ThemedIcon.new_with_default_fallbacks(icon_name)
@@ -1027,7 +966,8 @@ class MainWindow(Gtk.Application):
         address_item.set_expand(True)
         address_item.add(address_entry)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('go-previous-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'go-previous-symbolic')
         btn_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
         back_button = Gtk.Button()
         back_button.set_image(btn_img)
@@ -1043,8 +983,8 @@ class MainWindow(Gtk.Application):
 
         history_grid = Gtk.Grid()
         history_grid.attach(back_button, 0, 0, 1, 1)
-        history_grid.attach_next_to(forward_button, back_button,
-                                   Gtk.PositionType.RIGHT, 1, 1)
+        history_grid.attach_next_to(
+            forward_button, back_button, Gtk.PositionType.RIGHT, 1, 1)
 
         button_item = Gtk.ToolItem()
         button_item.add(history_grid)
@@ -1062,7 +1002,8 @@ class MainWindow(Gtk.Application):
         label.set_margin_bottom(5)
         label.set_ellipsize(Pango.EllipsizeMode.END)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('window-close-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'window-close-symbolic')
         btn_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         tab_close_btn = Gtk.Button()
@@ -1071,7 +1012,8 @@ class MainWindow(Gtk.Application):
         tab_close_btn.set_relief(Gtk.ReliefStyle.NONE)
         tab_close_btn.set_margin_end(6)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('audio-volume-medium-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'audio-volume-medium-symbolic')
         playing_icon = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.MENU)
         playing_icon.set_margin_top(6)
         playing_icon.set_margin_bottom(6)
@@ -1091,12 +1033,12 @@ class MainWindow(Gtk.Application):
         label_grid = Gtk.Grid()
         label_grid.set_column_spacing(6)
         label_grid.attach(icon_stack, 0, 0, 1, 1)
-        label_grid.attach_next_to(label, icon_stack, Gtk.PositionType.RIGHT, 1,
-                                  1)
-        label_grid.attach_next_to(playing_icon, label, Gtk.PositionType.RIGHT,
-                                  1, 1)
-        label_grid.attach_next_to(tab_close_btn, playing_icon,
-                                  Gtk.PositionType.RIGHT, 1, 1)
+        label_grid.attach_next_to(
+            label, icon_stack, Gtk.PositionType.RIGHT, 1, 1)
+        label_grid.attach_next_to(
+            playing_icon, label, Gtk.PositionType.RIGHT, 1, 1)
+        label_grid.attach_next_to(
+            tab_close_btn, playing_icon, Gtk.PositionType.RIGHT, 1, 1)
 
         eventbox= Gtk.EventBox()
         eventbox.set_hexpand(False)
@@ -1120,8 +1062,8 @@ class MainWindow(Gtk.Application):
             tab_grid.attach(address_bar, 0, 0, 1, 1)
         tab_grid.attach(overlay, 0, 1, 1, 1)
         tab_grid.show_all()
-        tab_grid.attach_next_to(find_bar, overlay, Gtk.PositionType.BOTTOM, 1,
-                                1)
+        tab_grid.attach_next_to(
+            find_bar, overlay, Gtk.PositionType.BOTTOM, 1, 1)
 
         i = index if focus or index > -1 else self._tabs.get_current_page() + 1
         index = self._tabs.insert_page(tab_grid, eventbox, i)
@@ -1178,7 +1120,7 @@ class MainWindow(Gtk.Application):
             'order': 0,
             'closing': False,
             'plug-added': False,
-            })
+        })
 
         child['title-str'] = f'{child.title} (pid: {child.pid}) {child.private_str}'
         eventbox.set_size_request(child.normal_width, -1)
@@ -1186,37 +1128,37 @@ class MainWindow(Gtk.Application):
         self._windows[socket_id] = child
 
         signal_handlers = (
-                (find_close, 'clicked', lambda btn: find_bar.hide()),
-                (back_button, 'button-release-event', self._back_released,
-                    child),
-                (back_button, 'button-press-event',
-                    lambda btn, evnt: evnt.button == 3),
-                (forward_button, 'button-release-event',
-                    self._forward_released, child),
-                (forward_button, 'button-press-event',
-                    lambda btn, evnt: evnt.button == 3),
-                (socket, 'plug-removed', self._plug_removed, child),
-                (socket, 'plug-added', self._plug_added, child),
-                (eventbox, 'button-press-event', self._tab_button_press,
-                    child),
-                (eventbox, 'button-release-event', self._tab_button_release,
-                    child),
-                (address_entry, 'activate',
-                    lambda e: child.send('open-uri', e.get_text())),
-                (address_entry, 'icon-release',
-                    self._address_entry_icon_release, child),
-                (address_entry, 'changed', self._address_entry_changed, child),
-                (address_entry, 'populate-popup', self._address_populate_popup,
-                    child),
-                (find_entry, 'activate', self._find, child),
-                (find_entry, 'changed', self._find, child),
-                (find_next, 'button-release-event', self._find_next_button,
-                    child),
-                (find_prev, 'button-release-event', self._find_prev_button,
-                    child),
-                (tab_close_btn, 'button-release-event',
-                    self._tab_button_release, child),
-                )
+            (find_close, 'clicked', lambda btn: find_bar.hide()),
+            (back_button, 'button-release-event', self._back_released,
+             child),
+            (back_button, 'button-press-event',
+             lambda btn, evnt: evnt.button == 3),
+            (forward_button, 'button-release-event',
+             self._forward_released, child),
+            (forward_button, 'button-press-event',
+             lambda btn, evnt: evnt.button == 3),
+            (socket, 'plug-removed', self._plug_removed, child),
+            (socket, 'plug-added', self._plug_added, child),
+            (eventbox, 'button-press-event', self._tab_button_press,
+             child),
+            (eventbox, 'button-release-event', self._tab_button_release,
+             child),
+            (address_entry, 'activate',
+             lambda e: child.send('open-uri', e.get_text())),
+            (address_entry, 'icon-release',
+             self._address_entry_icon_release, child),
+            (address_entry, 'changed', self._address_entry_changed, child),
+            (address_entry, 'populate-popup', self._address_populate_popup,
+             child),
+            (find_entry, 'activate', self._find, child),
+            (find_entry, 'changed', self._find, child),
+            (find_next, 'button-release-event', self._find_next_button,
+             child),
+            (find_prev, 'button-release-event', self._find_prev_button,
+             child),
+            (tab_close_btn, 'button-release-event',
+             self._tab_button_release, child),
+        )
 
         for widget, event, func, *args in signal_handlers:
             sig_id = widget.connect(event, func, *args)
@@ -1234,10 +1176,7 @@ class MainWindow(Gtk.Application):
         return socket_id, child
 
     def _set_state(self, child: dict, state: dict):
-        """ Set the state of child tab.
-
-        """
-
+        """Set the state of child tab."""
         if state.get('hidden', False):
             self._hide_tab(child)
         if state.get('minimized', False):
@@ -1245,20 +1184,14 @@ class MainWindow(Gtk.Application):
 
     def _yank_hover(self, accels: object, window: object, keyval: object,
                     flags: object):
-        """ Put the last uri that was hovered over in the clipboard.
-
-        """
-
+        """Put the last uri that was hovered over in the clipboard."""
         child = self._get_child_dict()
         if 'hover-uri' in child:
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(child.hover_uri, -1)
 
     def _mouse_move(self, window: object, event: object):
-        """ Hide/unhide address-bar.
-
-        """
-
+        """Hide/unhide address-bar."""
         if self._profile.hide_address_bar:
             child = self._get_child_dict()
             child.address_bar.show_all()
@@ -1267,18 +1200,16 @@ class MainWindow(Gtk.Application):
             if not self._main_popover.get_property('visible'):
                 child.address_entry.grab_focus()
 
-    def _escape(self, accels: object, window: object, keyval: object, flags: object):
-        """ Do stuff.
-
-        """
-
+    def _escape(self, accels: object, window: object, keyval: object,
+                flags: object):
+        """Do stuff."""
         child = self._get_child_dict()
         if child.address_entry.has_focus():
             uri_str = '' if child.uri == 'about:blank' else child.uri
             child.address_entry.set_text(uri_str)
             icon = self._stop_icon if child.is_loading else self._refresh_icon
-            child.address_entry.set_icon_from_gicon(Gtk.EntryIconPosition.SECONDARY,
-                                                    icon)
+            child.address_entry.set_icon_from_gicon(
+                Gtk.EntryIconPosition.SECONDARY, icon)
             if self._profile.hide_address_bar:
                 child.address_bar.hide()
         elif child.find_entry.has_focus():
@@ -1287,10 +1218,7 @@ class MainWindow(Gtk.Application):
             child.send('stop', True)
 
     def _address_entry_changed(self, entry: object, child: dict):
-        """ Changes secondary icon depending on if entry has focus or not.
-
-        """
-
+        """Changes secondary icon depending on if entry has focus or not."""
         entry_uri = entry.get_text()
         is_uri = (entry_uri == child.uri)
         icon = self._stop_icon if child.is_loading else self._refresh_icon
@@ -1308,15 +1236,12 @@ class MainWindow(Gtk.Application):
                                           self._find_icon)
                 tooltip_text = 'Search for text in address entry.'
 
-        child.address_entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                                  tooltip_text)
+        child.address_entry.set_icon_tooltip_text(
+            Gtk.EntryIconPosition.SECONDARY, tooltip_text)
 
     def _address_populate_popup(self, entry: object, popup: object,
                                 child: dict):
-        """ Add items to the popup.
-
-        """
-
+        """Add items to the popup."""
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         text = clipboard.wait_for_text()
         if text:
@@ -1327,10 +1252,7 @@ class MainWindow(Gtk.Application):
             popup.prepend(item)
 
     def _findbar_toggle(self, *args):
-        """ Toggle findbar visibility.
-
-        """
-
+        """Toggle findbar visibility."""
         child = self._get_child_dict()
         find_bar = child['find-bar']
         find_entry = child['find-entry']
@@ -1348,19 +1270,13 @@ class MainWindow(Gtk.Application):
             find_entry.grab_focus()
 
     def _find(self, entry: object, child: dict):
-        """ Search the page.
-
-        """
-
+        """Search the page."""
         self._profile.find_str = entry.get_text()
         child.send('find', entry.get_text())
 
     def _find_next_key(self, accels: object, window: object, keyval: object,
                        flags: object):
-        """ Find next.
-
-        """
-
+        """Find next."""
         child = self._get_child_dict()
         find_bar = child['find-bar']
         find_entry = child['find-entry']
@@ -1378,15 +1294,9 @@ class MainWindow(Gtk.Application):
             child.send('find-next', find_entry.get_text())
 
     def button_release(func):
-        """ Wrap button release events.
-
-        """
-
+        """Wrap button release events."""
         def wrapper(self, *args, **kwargs):
-            """ Call func only if the mouse is still over widget.
-
-            """
-
+            """Call func only if the mouse is still over widget."""
             # Grab the event out of args.
             types_list = [Gdk.Event, Gdk.EventButton]
             event = [i for i in args if type(i) in types_list][0]
@@ -1401,25 +1311,16 @@ class MainWindow(Gtk.Application):
 
     @button_release
     def _find_next_button(self, button: object, event: object, child: dict):
-        """ find next.
-
-        """
-
+        """Find next."""
         child.send('find-next', child.find_entry.get_text())
 
     @button_release
     def _find_prev_button(self, button: object, event: object, child: dict):
-        """ find prev.
-
-        """
-
+        """find prev."""
         child.send('find-prev', child.find_entry.get_text())
 
     def _minimize_tab(self, child: dict):
-        """ Hide/unhide the label of the current tab.
-
-        """
-
+        """Hide/unhide the label of the current tab."""
         if not child: child = self._get_child_dict()
         child.label.set_visible(not child.label.get_visible())
         child.state['minimized'] = not child.label.get_visible()
@@ -1429,10 +1330,7 @@ class MainWindow(Gtk.Application):
             child.event_box.set_size_request(child.minimized_width, -1)
 
     def _hide_tab(self, child: dict):
-        """ Hide/unhide the label_grid of the current tab.
-
-        """
-
+        """Hide/unhide the label_grid of the current tab."""
         if not child: child = self._get_child_dict()
         child.label_grid.set_visible(not child.label_grid.get_visible())
         child.state['hidden'] = not child.label_grid.get_visible()
@@ -1445,10 +1343,7 @@ class MainWindow(Gtk.Application):
             child.event_box.set_size_request(child.hidden_width, -1)
 
     def _hist_button_do(self, event: object, child: dict, index: int):
-        """ Handles going forward or backward in the history if child.
-
-        """
-
+        """Handles going forward or backward in the history if child."""
         hist_list = child.forward_list if index == 1 else child.back_list
 
         if event.button == 3:
@@ -1460,28 +1355,19 @@ class MainWindow(Gtk.Application):
 
     @button_release
     def _back_released(self, button: object, event: object, child: dict):
-        """ Go Back.
-
-        """
-
+        """Go Back."""
         self._hist_button_do(event, child, -1)
         return False
 
     @button_release
     def _forward_released(self, button: object, event: object, child: dict):
-        """ Go forward.
-
-        """
-
+        """Go forward."""
         self._hist_button_do(event, child, 1)
         return False
 
     def _make_history_menu(self, hist_list: list, back: bool,
                            child: dict) -> object:
-        """ Returns a menu or hist_list ready to popup.
-
-        """
-
+        """Returns a menu or hist_list ready to popup."""
         menu = child.history_menu
         menu.foreach(menu.remove)
 
@@ -1493,10 +1379,15 @@ class MainWindow(Gtk.Application):
             label.set_ellipsize(Pango.EllipsizeMode.END)
             menu_item = Gtk.MenuItem()
             menu_item.add(label)
-            menu_item.connect('button-release-event',
-                              lambda itm, evnt, chld: \
-                                      self._history_go(evnt, chld, itm.index),
-                                      child)
+            menu_item.connect(
+                'button-release-event',
+                lambda itm, evnt, chld: self._history_go(
+                    evnt,
+                    chld,
+                    itm.index
+                ),
+                child
+            )
             menu_item.index = -(index + 1) if back else len(hist_list) - index
             menu.append(menu_item) if back else menu.insert(menu_item, 0)
 
@@ -1505,10 +1396,7 @@ class MainWindow(Gtk.Application):
         return menu
 
     def _history_go(self, event: object, child: dict, index: int):
-        """ Go to index in child's history.
-
-        """
-
+        """Go to index in child's history."""
         hist_list = child.forward_list if index > 0 else child.back_list
 
         if event.button == 2 or (event.button == 1 and \
@@ -1522,10 +1410,7 @@ class MainWindow(Gtk.Application):
     @button_release
     def _address_entry_icon_release(self, entry: object, icon_pos: object,
                                     event: object, child: dict):
-        """ Do stuff when an icon is clicked.
-
-        """
-
+        """Do stuff when an icon is clicked."""
         if icon_pos == Gtk.EntryIconPosition.PRIMARY:
             self._bookmark_menu.show_all()
             self._bookmark_menu.popup_at_widget(entry, Gdk.Gravity.SOUTH_WEST,
@@ -1555,10 +1440,7 @@ class MainWindow(Gtk.Application):
 
     def _open_new_tab(self, flags: object, settings: dict = {},
                       child: dict = {}):
-        """ Open a new tab based on event.
-
-        """
-
+        """Open a new tab based on event."""
         if not child: child = self._get_child_dict()
 
         if not flags & Gdk.ModifierType.SHIFT_MASK:
@@ -1572,21 +1454,17 @@ class MainWindow(Gtk.Application):
 
     @button_release
     def _new_tab_released(self, button: object, event: object):
-        """ Open a new tab if the mouse is still on the button when it is
-        released.
+        """Call _open_new_tab.
 
+        Open a new tab if the mouse is still on the button when it is released.
         """
-
         self._open_new_tab(event.state, settings={'uri': self._home_uri,
                                                   'focus': True})
 
         return True
 
     def _tab_scrolled(self, notebook: object, event: object):
-        """ Switch to next or previous tab.
-
-        """
-
+        """Switch to next or previous tab."""
         # Enable scrolling through the tabs.
         if event.direction == Gdk.ScrollDirection.DOWN:
             self._tabs.next_page()
@@ -1594,17 +1472,11 @@ class MainWindow(Gtk.Application):
             self._tabs.prev_page()
 
     def _tab_reordered(self, notebook: object, tab_grid: object, index: int):
-        """ Set the new ordering.
-
-        """
-
+        """Set the new ordering."""
         logging.info(f'{tab_grid} {index}')
 
     def _tab_switched(self, notebook: object, tab_grid: object, index: int):
-        """ Do stuff when the tab is switched.
-
-        """
-
+        """Do stuff when the tab is switched."""
         # Do nothing if there are no more tabs.
         if not self._windows: return True
 
@@ -1628,20 +1500,14 @@ class MainWindow(Gtk.Application):
         return True
 
     def _tab_removed(self, notebook: object, child: object, index: int):
-        """ Remove page info.
-
-        """
-
+        """Remove page info."""
         if notebook.get_n_pages() == 0:
             logging.info("NO MORE PAGES, EXITING")
             # Finally destroy the window.
             self._window.destroy()
 
     def _to_last_tab(self, child: object):
-        """ Switch to the correct tab before closing.
-
-        """
-
+        """Switch to the correct tab before closing."""
         # Sort the tabs by the order they were last active.
         tmp_list = sorted(self._windows.values(), key=lambda i: i.order)
 
@@ -1654,20 +1520,14 @@ class MainWindow(Gtk.Application):
         self._tabs.set_current_page(self._tabs.page_num(last.tab_grid))
 
     def _tab_button_press(self, eventbox: object, event: object, child: dict):
-        """ Close the tab.
-
-        """
-
+        """Close the tab."""
         if event.button == 2 or (event.button == 1 and \
                 event.state & Gdk.ModifierType.CONTROL_MASK):
             return True
 
     @button_release
     def _tab_button_release(self, widget: object, event: object, child: dict):
-        """ Close the tab.
-
-        """
-
+        """Close the tab."""
         # Close tab if middle clicked, left clicked with ctrl pressed,
         # or the close button is pressed.
         if event.button == 2 or (event.button == 1 and \
@@ -1676,12 +1536,10 @@ class MainWindow(Gtk.Application):
             return self._close_tab(event.state, child)
 
     def _close_tab(self, flags: object, child: dict):
-        """ Close child's tab.
-
-        """
-
+        """Close child's tab."""
         # Switch to the last focused tab before closing the current tab.
-        if self._tabs.get_nth_page(self._tabs.get_current_page()) == child['tab_grid']:
+        nth_page = self._tabs.get_nth_page(self._tabs.get_current_page())
+        if nth_page == child['tab_grid']:
             self._to_last_tab(child)
 
         # Force the tab to close and terminate the child process if ALT
@@ -1701,11 +1559,11 @@ class MainWindow(Gtk.Application):
         return True
 
     def _get_child_dict(self, tab_grid: object = None):
-        """ Returns the child dict of the current tab if tab_grid is None,
+        """Return the child dict of the current tab.
+
+        If tab_grid is None, return the child dict of the current tab,
         otherwise the child_dict containing tab_grid.
-
         """
-
         if not self._windows:
             return {'title': 'about:blank', 'uri': 'about:blank'}
 
@@ -1716,48 +1574,33 @@ class MainWindow(Gtk.Application):
 
     def _new_tab(self, accels: object, window: object, keyval: object,
                  flags: object):
-        """ Open a new tab.
-
-        """
-
+        """Open a new tab."""
         settings = {'focus': True, 'uri': self._home_uri}
         self._open_new_tab(flags, settings=settings)
 
     def _close_tab_key(self, accels: object, window: object, keyval: object,
                        flags: object):
-        """ Close tab.
-
-        """
-
+        """Close tab."""
         logging.info('Close tab')
         child = self._get_child_dict()
         self._close_tab(flags, child)
 
     def _switch_tab_key(self, accels: object, window: object, keyval: object,
                         flags: object):
-        """ Switch tab.
-
-        """
-
+        """Switch tab on <ALT-NUMBER> keypress."""
         logging.info(f'Switch tab {keyval - 49} {keyval}')
         if self._tabs.get_n_pages() > (keyval - 49):
             self._tabs.set_current_page(keyval - 49)
 
     def _focus_address_entry_key(self, accels: object, window: object,
                                  keyval: object, flags: object):
-        """ Focus the address bar entry.
-
-        """
-
+        """Focus the address bar entry."""
         child = self._get_child_dict()
         child.address_bar.show_all()
         child.address_entry.grab_focus()
 
     def _new_proc(self, settings: dict, child: dict) -> int:
-        """ Start a new process using settings and returns the pid.
-
-        """
-
+        """Start a new process using settings and return the pid."""
         self._send('new-proc', settings)
         signal, data = self._recv()
         if signal != 'proc-pid': return 0
@@ -1767,10 +1610,7 @@ class MainWindow(Gtk.Application):
         return data
 
     def _plug_removed(self, socket: object, child: dict):
-        """ Re-open removed plug.
-
-        """
-
+        """Re-open removed plug."""
         logging.info(f"PLUG REMOVED: {child.uri}")
         self._send('terminate', child['pid'])
 
@@ -1783,10 +1623,7 @@ class MainWindow(Gtk.Application):
         return True
 
     def _plug_added(self, socket: object, child: dict):
-        """ Log that the plug was added.
-
-        """
-
+        """Log that the plug was added."""
         logging.info(f'PLUG ADDED to {child.tab_grid}')
         child.plug_added = True
         # child.tab_grid.show_all()
@@ -1796,51 +1633,36 @@ class MainWindow(Gtk.Application):
         #     child.address_entry.grab_focus()
 
     def _bookmark_release(self, menu: object, event: object, uri: str):
-        """ Open the bookmark.
-
-        """
-
+        """Open the bookmark."""
         child = self._get_child_dict()
 
         if event.button == 2 or (event.button == 1 and \
                 event.state & Gdk.ModifierType.CONTROL_MASK):
             settings = {
-                    'uri': uri,
-                    'focus': False,
-                    'index': self._tabs.page_num(child.tab_grid) + 1,
-                    }
+                'uri': uri,
+                'focus': False,
+                'index': self._tabs.page_num(child.tab_grid) + 1,
+            }
             self._open_new_tab(event.state, settings, child)
         elif event.button == 1:
             child.send('open-uri', uri)
 
     def _bookmark_open_folder(self, menu: object, uri_list: list):
-        """ Open the uri_list as tabs.
-
-        """
-
+        """Open the uri_list as tabs."""
         for uri in uri_list:
             pid = self._new_proc(*self._make_tab(uri=uri, focus=True))
 
     def _bookmark_new(self, menu: object):
-        """ Return the current tab.
-
-        """
-
+        """Return the current tab."""
         child = self._get_child_dict()
         return child.uri, child.title
 
     def _bookmark_tab_list(self, menu: object):
-        """ Return a list of the tabs info.
-
-        """
-
+        """Return a list of the tabs info."""
         return [(i.uri, i.title) for _, i in self._windows.items()]
 
     def _handle_extern_signal(self, source: int, cb_condition: int):
-        """ Open new tabs if send the correct signal.
-
-        """
-
+        """Open new tabs if send the correct signal."""
         data = self._socket.recv(4096)
         logging.info(f"EXTERN SIGNAL: {data}")
 

@@ -19,23 +19,19 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-""" Functions used by both the socket process and the plug.
+"""Functions used by both the socket process and the plug."""
 
-"""
-
+import logging
+import pathlib
 from gi import require_version as gi_require_version
 gi_require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
-import pathlib
-import logging
-
 
 def looks_like_uri(test_text: str):
-    """ Test test_text and returns true if it looks like a uri.  Otherwise
-    return False.
+    """ Test test_text.
 
+    Return true if it looks like a uri.  Otherwise return False.
     """
-
     if ' ' in test_text.strip() or '.' not in test_text or not test_text:
         return False
 
@@ -43,11 +39,10 @@ def looks_like_uri(test_text: str):
 
 
 def get_config_path(profile: str = 'default'):
-    """ Returns the path to the config files.  If it doesn't exist it is
-    created.
+    """Return the path to the config files.
 
+    Create the config file profile directory if it does not exist.
     """
-
     xdg_config = pathlib.Path(GLib.get_user_config_dir())
     config_path = xdg_config.joinpath('webbrowser2').joinpath(profile)
     with pathlib.Path(config_path) as conf_path:
@@ -61,10 +56,10 @@ def get_config_path(profile: str = 'default'):
 
 def save_dialog(filename: str, folder: str, parent: object,
                 title: str = 'Save File') -> str:
-    """ Presents a file chooser dialog and returns a filename and folder tuple.
+    """Show a file chooser dialog.
 
+    Presents a file chooser dialog and returns a filename and folder tuple.
     """
-
     dialog = Gtk.FileChooserDialog(title, parent, Gtk.FileChooserAction.SAVE,
                                    (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                                     Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT))

@@ -23,36 +23,28 @@
 
 """
 
+from .bookmarks import EntryDialog
+from .functions import save_dialog
+from json import dumps as json_dumps
+from json import loads as json_loads
+import socket
+import logging
+import shutil
+import pathlib
 from gi import require_version as gi_require_version
 gi_require_version('Gtk', '3.0')
 from gi.repository import Gtk, GObject, GLib, Gio, WebKit2, Gdk, Pango
-import pathlib
-import shutil
-import logging
-import socket
-from json import loads as json_loads
-from json import dumps as json_dumps
 
-from .functions import save_dialog
-from .bookmarks import EntryDialog
 
 class ChildDict(dict):
-    """ A dictionary that has a send command.
-
-    """
+    """A dictionary that has a send command."""
 
     def __init__(self, *args, **kwargs):
-        """ Initialize.
-
-        """
-
+        """Initialize."""
         super(ChildDict, self).__init__(*args, **kwargs)
 
     def __getitem__(self, key: str):
-        """ Return the item associated with key.
-
-        """
-
+        """Return the item associated with key."""
         try:
             item = super(ChildDict, self).__getitem__(key)
         except KeyError:
@@ -65,31 +57,23 @@ class ChildDict(dict):
         return item
 
     def __getattr__(self, item: str):
-        """ Return the item from the dictionary.
-
-        """
-
+        """Return the item from the dictionary."""
         return self.__getitem__(item)
 
     def __setattr__(self, item: str, data: object):
-        """ Put data in self[item]
-
-        """
-
+        """Put data in self[item]."""
         self.__setitem__(item.replace('_', '-', item.count('_')), data)
 
 
 class Profile(dict):
-    """ A configuration dictionary that writes to a file in xdg-config
-    directory.
+    """A Profile configuration dictionary.
 
+    A configuration dictionary that writes to a file in xdg-config
+    directory.
     """
 
     def __init__(self, profile: str = 'default'):
-        """ Load the config from filename.
-
-        """
-
+        """Load the config from filename."""
         super(Profile, self).__init__()
 
         self._socket = None
@@ -116,81 +100,84 @@ class Profile(dict):
         self.bookmarks_file = str(self._config_path.joinpath('bookmarks.xbel'))
 
     def __getitem__(self, key: object) -> object:
-        """ Get the config item otherwise create a default.
-
-        """
-
+        """Get the config item otherwise create a default."""
         try:
             return super(Profile, self).__getitem__(key)
         except KeyError:
             if key == 'web-view-settings':
                 self[key] = {
-                        'enable-page-cache': False,
-                        'enable-dns-prefetching': False,
-                        'enable-html5-database': False,
-                        'enable-html5-local-storage': False,
-                        'enable-offline-web-application-cache': False,
-                        'enable-hyperlink-auditing': True,
-                        'enable-media-stream': False,
-                        'enable-java': False,
-                        'enable-plugins': False,
-                        'enable-mediasource': True,
-                        'enable-javascript': True,
-                        'enable-javascript-markup': True,
-                        'enable-webaudio': True,
-                        'enable-webgl': True,
-                        'enable-accelerated-2d-canvas': True,
-                        'enable-developer-extras': True,
-                        'allow-file-access-from-file-urls': False,
-                        'allow-modal-dialogs': False,
-                        'auto-load-images': True,
-                        'draw-compositing-indicators': False,
-                        'enable-caret-browsing': False,
-                        'enable-frame-flattening': False,
-                        'enable-fullscreen': True,
-                        'enable-resizable-text-areas': True,
-                        'enable-site-specific-quirks': True,
-                        'enable-smooth-scrolling': False,
-                        'enable-spatial-navigation': False,
-                        'enable-tabs-to-links': True,
-                        'enable-write-console-messages-to-stdout': False,
-                        'enable-xss-auditor': True,
-                        'javascript-can-access-clipboard': False,
-                        'javascript-can-open-windows-automatically': False,
-                        'media-playback-requires-user-gesture': False,
-                        'print-backgrounds': True,
-                        'zoom-text-only': False,
-                        'default-font-family': 'sans-serif',
-                        'default-font-size': 16,
-                        'serif-font-family': 'Serif 10',
-                        'sans-serif-font-family': 'Sans 10',
-                        'monospace-font-family': 'Monospace 10',
-                        'enable-media': True,
-                        }
+                    'enable-page-cache': False,
+                    'enable-dns-prefetching': False,
+                    'enable-html5-database': False,
+                    'enable-html5-local-storage': False,
+                    'enable-offline-web-application-cache': False,
+                    'enable-hyperlink-auditing': True,
+                    'enable-media-stream': False,
+                    'enable-java': False,
+                    'enable-plugins': False,
+                    'enable-mediasource': True,
+                    'enable-javascript': True,
+                    'enable-javascript-markup': True,
+                    'enable-webaudio': True,
+                    'enable-webgl': True,
+                    'enable-accelerated-2d-canvas': True,
+                    'enable-developer-extras': True,
+                    'allow-file-access-from-file-urls': False,
+                    'allow-modal-dialogs': False,
+                    'auto-load-images': True,
+                    'draw-compositing-indicators': False,
+                    'enable-caret-browsing': False,
+                    'enable-frame-flattening': False,
+                    'enable-fullscreen': True,
+                    'enable-resizable-text-areas': True,
+                    'enable-site-specific-quirks': True,
+                    'enable-smooth-scrolling': False,
+                    'enable-spatial-navigation': False,
+                    'enable-tabs-to-links': True,
+                    'enable-write-console-messages-to-stdout': False,
+                    'enable-xss-auditor': True,
+                    'javascript-can-access-clipboard': False,
+                    'javascript-can-open-windows-automatically': False,
+                    'media-playback-requires-user-gesture': False,
+                    'print-backgrounds': True,
+                    'zoom-text-only': False,
+                    'default-font-family': 'sans-serif',
+                    'default-font-size': 16,
+                    'serif-font-family': 'Serif 10',
+                    'sans-serif-font-family': 'Sans 10',
+                    'monospace-font-family': 'Monospace 10',
+                    'enable-media': True,
+                }
             elif key == 'adblock':
                 self[key] = {
-                        '/ads/': ('\/ads\/', True),
-                        'doubleclick': ('doubleclick\.net', True),
-                        'pubads': ('pubads\.', True),
-                        }
+                    '/ads/': (r'\/ads\/', True),
+                    'doubleclick': (r'doubleclick\.net', True),
+                    'pubads': (r'pubads\.', True),
+                }
             elif key == 'media-filters':
                 self[key] = {
-                        'soundcloud mp3s': ('\.mp3\?', True),
-                        }
+                    'soundcloud mp3s': (r'\.mp3\?', True),
+                }
             elif key == 'search':
                 self[key] = {
-                        'StartPage': 'https://startpage.com/do/search?query=%s'
-                        }
+                    'StartPage': 'https://startpage.com/do/search?query=%s'
+                }
             elif key == 'default-search':
                 self[key] = 'StartPage'
             elif key == 'user-agents':
                 self[key] = {
-                        'Chromium': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36',
-                        }
+                    'Chromium': 'Mozilla/5.0 (X11; Linux x86_64) '
+                                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                'Chrome/49.0.2623.110 Safari/537.36',
+                }
             elif key == 'content-filters':
                 self[key] = {
-                        'easylist_min': ('https://easylist-downloads.adblockplus.org/easylist_min_content_blocker.json', True),
-                        }
+                    'easylist_min': (
+                        'https://easylist-downloads.adblockplus.org/easylist_m'
+                        'in_content_blocker.json',
+                        True
+                    ),
+                }
             elif key == 'content-filter-whitelist':
                 self[key] = {}
             elif key == 'default-user-agent':
@@ -207,11 +194,8 @@ class Profile(dict):
                 self[key] = 'https://www.startpage.com'
             return super(Profile, self).__getitem__(key)
 
-    def __getattr__(self, item: str):
-        """ Return the item from the dictionary.
-
-        """
-
+    def __getattr__(self, item: str) -> object:
+        """Return the item from the dictionary."""
         try:
             return super(Profile, self).__getattr__(item)
         except AttributeError:
@@ -219,22 +203,19 @@ class Profile(dict):
             return self.__getitem__(item)
 
     def __setattr__(self, item: str, data: object):
-        """ Put data in self[item]
-
-        """
-
+        """Put data in self[item]."""
         key = item.replace('_', '-', item.count('_'))
         if key in self:
             self.__setitem__(key, data)
         else:
             super(Profile, self).__setattr__(item, data)
 
-    def get_config_path(self, profile: str = 'default'):
-        """ Returns the path to the config files.  If it doesn't exist it is
+    def get_config_path(self, profile: str = 'default') -> object:
+        """Get and create config path.
+
+        Returns the path to the config files.  If it doesn't exist it is
         created.
-
         """
-
         xdg_config = pathlib.Path(GLib.get_user_config_dir())
         if not xdg_config.exists():
             xdg_config.mkdir()
@@ -253,18 +234,12 @@ class Profile(dict):
         return profile_path
 
     def save_config(self):
-        """ Save the config to a file.
-
-        """
-
+        """Save the config to a file."""
         with pathlib.Path(self._config_file) as config_file:
             config_file.write_text(json_dumps(self, indent=4))
 
     def open_socket(self, uri_list: list) -> object:
-        """ Open and return a socket.
-
-        """
-
+        """Open and return a socket."""
         if self._socket_file.is_socket():
             try:
                 self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -281,18 +256,12 @@ class Profile(dict):
         return self._socket
 
     def close_socket(self):
-        """ Close the socket.
-
-        """
-
+        """Close the socket."""
         self._socket.close()
         self._socket_file.unlink()
 
     def get_file(self, target: str) -> str:
-        """ Return the target file text or path string or ''.
-
-        """
-
+        """Return the target file text or path string or ''."""
         if target == 'content-filters':
             return str(self._config_path.joinpath('content filters'))
 
@@ -305,15 +274,10 @@ class Profile(dict):
 
 
 class SettingsPopover(Gtk.Popover):
-    """ The Settings and session popover.
-
-    """
+    """The Settings and session popover."""
 
     def __init__(self):
-        """ Init.
-
-        """
-
+        """Init."""
         super(SettingsPopover, self).__init__()
 
         self._tabs = Gtk.Notebook()
@@ -324,25 +288,17 @@ class SettingsPopover(Gtk.Popover):
         self.add(self._tabs)
 
     def add_tab(self, widget: object, title: str):
-        """ Add a tab for widget.
-
-        """
-
+        """Add a tab for widget."""
         title_widget = Gtk.Label(title)
         title_widget.set_angle(90)
         self._tabs.append_page(widget, title_widget)
 
 
 class DownloadManager(Gtk.Grid):
-    """ The download manager grid holds indevidule downloads in a listbox.
-
-    """
+    """The download manager grid holds indevidule downloads in a listbox."""
 
     def __init__(self, parent: object = None):
-        """ Create the listbox to hold downloads.
-
-        """
-
+        """Create the listbox to hold downloads."""
         super(DownloadManager, self).__init__()
 
         self._parent = parent
@@ -374,7 +330,8 @@ class DownloadManager(Gtk.Grid):
         main_stack.add_named(scroll, 'download')
         main_stack.add_named(empty_label, 'empty')
 
-        self._download_list.connect('remove', self._download_removed, main_stack)
+        self._download_list.connect(
+            'remove', self._download_removed, main_stack)
         self._download_list.connect('add', self._download_added, main_stack)
 
         clear_button = Gtk.Button('Clear List')
@@ -394,10 +351,7 @@ class DownloadManager(Gtk.Grid):
         main_stack.set_visible_child_name('empty')
 
     def _download_size_allocate(self, download_list, rect):
-        """ Scroll to the bottom of the download list.
-
-        """
-
+        """Scroll to the bottom of the download list."""
         # Scroll to the bottom.
         v_adj = self._scroll.get_vadjustment()
         v_adj.set_value(v_adj.get_upper() - v_adj.get_page_size())
@@ -407,10 +361,7 @@ class DownloadManager(Gtk.Grid):
         self._download_list.disconnect_by_func(self._download_size_allocate)
 
     def new_download(self, uri: str, start: bool = True):
-        """ Add a download to the list.
-
-        """
-
+        """Add a download to the list."""
         if not start:
             # If download is just added for the uri do not add
             # duplicates.
@@ -436,7 +387,8 @@ class DownloadManager(Gtk.Grid):
         copy_button.set_relief(Gtk.ReliefStyle.NONE)
         copy_button.connect('clicked', self._copy_clicked, uri)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('window-close-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'window-close-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         cancel_button = Gtk.Button()
@@ -464,10 +416,11 @@ class DownloadManager(Gtk.Grid):
 
         finish_label_event = Gtk.EventBox()
         finish_label_event.add(finish_label)
-        finish_label_event.connect('button-release-event',
-                                   self._finish_button_release, uri)
+        finish_label_event.connect(
+            'button-release-event', self._finish_button_release, uri)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('document-open-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'document-open-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         open_button = Gtk.Button()
@@ -475,7 +428,8 @@ class DownloadManager(Gtk.Grid):
         open_button.set_image(button_img)
         open_button.set_relief(Gtk.ReliefStyle.NONE)
 
-        icon = Gio.ThemedIcon.new_with_default_fallbacks('list-remove-symbolic')
+        icon = Gio.ThemedIcon.new_with_default_fallbacks(
+            'list-remove-symbolic')
         button_img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
 
         remove_button = Gtk.Button()
@@ -505,8 +459,8 @@ class DownloadManager(Gtk.Grid):
         self._download_list.add(download_stack)
 
         # Scroll to the bottom when the download list is displayed.
-        self._download_list.connect('size-allocate',
-                                    self._download_size_allocate)
+        self._download_list.connect(
+            'size-allocate', self._download_size_allocate)
 
         if start:
             context = WebKit2.WebContext.get_default()
@@ -528,17 +482,13 @@ class DownloadManager(Gtk.Grid):
         else:
             download = None
 
-        cancel_button.connect('clicked', self._close_button_clicked,
-                              download_stack, download)
-        remove_button.connect('clicked', self._close_button_clicked,
-                              download_stack, download)
+        cancel_button.connect(
+            'clicked', self._close_button_clicked, download_stack, download)
+        remove_button.connect(
+            'clicked', self._close_button_clicked, download_stack, download)
 
-    def _finish_button_release(self, button: object, event: object,
-                               uri: str):
-        """ Popup menu.
-
-        """
-
+    def _finish_button_release(self, button: object, event: object, uri: str):
+        """Popup menu."""
         # Don't do anything if the pointer was moved off the button.
         if event.window != event.device.get_window_at_position()[0]:
             return False
@@ -552,10 +502,7 @@ class DownloadManager(Gtk.Grid):
             menu.popup(None, None, None, None, event.button, event.time)
 
     def cancel_all(self):
-        """ Cancel all downloads.
-
-        """
-
+        """Cancel all downloads."""
         for download in self._downloads:
             download.disconnect_by_func(self._download_failed)
             download.disconnect_by_func(self._download_finished)
@@ -563,28 +510,19 @@ class DownloadManager(Gtk.Grid):
         self._downloads = []
 
     def _clear_clicked(self, button: object):
-        """ Clear all downloads from the list.
-
-        """
-
+        """Clear all downloads from the list."""
         self.cancel_all()
 
         self._download_list.foreach(self._download_list.remove)
 
     def _copy_clicked(self, button: object, uri: str):
-        """ Copy uri into clipboard.
-
-        """
-
+        """Copy uri into clipboard."""
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(uri, -1)
 
     def _close_button_clicked(self, button: object, download_stack: object,
                               download: object):
-        """ Remove the download.
-
-        """
-
+        """Remove the download."""
         if download:
             download.disconnect_by_func(self._download_failed)
             download.disconnect_by_func(self._download_finished)
@@ -594,49 +532,35 @@ class DownloadManager(Gtk.Grid):
         self._download_list.remove(download_stack.get_parent())
 
     def _open_clicked(self, button: object, download: object):
-        """ Open the downloaded file.
-
-        """
-
+        """Open the downloaded file."""
         destination = download.get_destination()
         if destination:
             ret = Gtk.show_uri(None, download.get_destination(),
                                Gtk.get_current_event_time())
 
-    def _download_removed(self, listbox: object, widget: object, stack: object):
-        """ Add a label if the listbox is empty.
-
-        """
-
+    def _download_removed(self, listbox: object, widget: object,
+                          stack: object):
+        """Add a label if the listbox is empty."""
         if not listbox.get_children():
             stack.set_visible_child_name('empty')
 
     def _download_added(self, listbox: object, widget: object, stack: object):
-        """ Remove the label if a download is added.
-
-        """
-
+        """Remove the label if a download is added."""
         stack.set_visible_child_name('download')
 
     def _download_created_destination(self, download: object, destination: str,
                                       progress_bar: object):
-        """ The destination was decided on.
-
-        """
-
+        """The destination was decided on."""
         progress_bar.set_text(destination.split('/')[-1])
         logging.info(f'DOWNLOAD DESTINATION {destination}')
 
     def _download_decide_destination(self, download: object,
                                      suggested_filename: str) -> bool:
-        """ Get a filename to save to.
-
-        """
-
+        """Get a filename to save to."""
         logging.info(f'DOWNLOAD TO {suggested_filename}')
         folder = GLib.get_user_special_dir(GLib.USER_DIRECTORY_DOWNLOAD)
-        filename = save_dialog(suggested_filename, folder, self._parent,
-                               'Download To')
+        filename = save_dialog(suggested_filename, folder,
+                               self._parent, 'Download To')
         if not filename:
             download.cancel()
             return False
@@ -649,10 +573,7 @@ class DownloadManager(Gtk.Grid):
 
     def _download_failed(self, download: object, error: object, label: object,
                          stack: object):
-        """ Download failed.
-
-        """
-
+        """Download failed."""
         dest_str = download.get_destination()
         uri = download.get_request().get_uri()
         dest_str = dest_str.split('/')[-1] if dest_str else uri
@@ -664,11 +585,9 @@ class DownloadManager(Gtk.Grid):
 
         logging.error(f'DOWNLOAD FAILED: {error}')
 
-    def _download_finished(self, download: object, label: object, stack: object):
-        """ Download finished.
-
-        """
-
+    def _download_finished(self, download: object, label: object,
+                           stack: object):
+        """Download finished."""
         dest_str = download.get_destination()
         uri = download.get_request().get_uri()
         dest_str = dest_str.split('/')[-1] if dest_str else uri
@@ -681,10 +600,7 @@ class DownloadManager(Gtk.Grid):
 
     def _download_response(self, download: object, response: object,
                            progress_bar: object):
-        """ Download response changed.
-
-        """
-
+        """Download response changed."""
         uri = download.get_property(response.name).get_uri()
         progress_bar.set_tooltip_text(uri)
 
@@ -692,9 +608,7 @@ class DownloadManager(Gtk.Grid):
 
     def _download_progress(self, download: object, progress: float,
                            progress_bar: object):
-        """ The download progress.
-
-        """
+        """The download progress."""
 
         progress = download.get_property(progress.name)
         progress_bar.set_fraction(progress)
