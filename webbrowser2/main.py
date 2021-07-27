@@ -19,42 +19,34 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-""" Main browser process
+"""Main browser process."""
 
-"""
-
-from multiprocessing import Process, Manager, Pipe, active_children
 import logging
+from multiprocessing import Pipe, Process, active_children
+from multiprocessing.connection import Connection
 
 
-def run_browser(data: object):
-    """ Runs a browser.
-
-    """
-
-    from plug_process import BrowserProc
+def run_browser(data: Connection):
+    """Run a browser plug process."""
+    from webbrowser2.plug_process import BrowserProc
     browser = BrowserProc(data)
     browser.run()
 
 
-def run_main(com_pipe: object, **kwargs):
-    """ Runs a main.
-
-    """
-
-    from socket_process import MainWindow
+def run_main(com_pipe: Connection, **kwargs):
+    """Run a main window process."""
+    from webbrowser2.socket_process import MainWindow
     main_window = MainWindow(com_pipe, **kwargs)
     main_window.run()
 
 
-def terminate_proc(proc: object):
-    """ Terminate and close a process.
-
-    """
-
-    if not proc: return True
+def terminate_proc(proc: Process) -> bool:
+    """Terminate and close a process."""
+    if not proc:
+        return True
     # If the process has exited do not join it.
-    if not proc.is_alive(): return True
+    if not proc.is_alive():
+        return True
 
     pid = proc.pid
 
@@ -69,12 +61,11 @@ def terminate_proc(proc: object):
     return True
 
 
-def main(main_proc: object, main_cpipe: object):
-    """ Listen on main_cpipe for signals.  Depending on what signal is recieved
-    it will start new child processes.
+def main(main_proc: Process, main_cpipe: Connection) -> bool:
+    """Listen on main_cpipe for signals.
 
+    Depending on what signal is recieved it will start new child processes.
     """
-
     window_dict = {}
 
     while main_proc.is_alive():
@@ -87,9 +78,12 @@ def main(main_proc: object, main_cpipe: object):
             break
         if signal == 'refresh':
             # Make sure all children exit.
-            logging.info('\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
+            logging.info(
+                '\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
             for pid, proc in tuple(window_dict.items()):
-                logging.info(f'PROCESS: {pid} {proc.exitcode=} {proc.is_alive()=}')
+                logging.info(
+                    f'PROCESS: {pid} {proc.exitcode=} {proc.is_alive()=}'
+                )
         if signal == 'new-proc':
             proc = Process(target=run_browser, args=(data,))
             proc.start()
@@ -103,7 +97,8 @@ def main(main_proc: object, main_cpipe: object):
             if proc:
                 proc.join(1)
                 main_cpipe.send(('is-alive', proc.is_alive()))
-                if not proc.is_alive(): window_dict.pop(data, None)
+                if not proc.is_alive():
+                    window_dict.pop(data, None)
             else:
                 main_cpipe.send(('is-alive', False))
         elif signal == 'terminate':
@@ -113,12 +108,14 @@ def main(main_proc: object, main_cpipe: object):
 
     logging.info(window_dict)
 
-    for proc in window_dict.values(): terminate_proc(proc)
+    for proc in window_dict.values():
+        terminate_proc(proc)
 
     # Make sure all children exit.
-    logging.info('\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
+    logging.info(
+        '\n'.join([f'PID: {t.pid} of {t}' for t in active_children()]))
 
-    return
+    return True
 
 
 if __name__ == '__main__':
@@ -131,16 +128,17 @@ if __name__ == '__main__':
     parser.add_argument('uri', nargs='*', default=['about:blank'])
     args, leftovers = parser.parse_known_args()
 
-    if args.verbosity == 0:
-        verbosity = 'CRITICAL'
-    elif args.verbosity == 1:
+    if args.verbosity == 1:
         verbosity = 'ERROR'
     elif args.verbosity == 2:
         verbosity = 'INFO'
     elif args.verbosity == 3:
         verbosity = 'DEBUG'
+    else:
+        verbosity = 'CRITICAL'
 
-    logging.basicConfig(format='\033[0;35m%(asctime)s\033[0m:\033[0;34m%(levelname)s\033[0m:%(message)s',
+    logging.basicConfig(format=("s033[0;35m%(asctime)s\033[0m:\033[0;34m"
+                                "%(levelname)s\033[0m:%(message)s"),
                         level=verbosity, datefmt='%a %h %d %T')
 
     main_cpipe, main_ppipe = Pipe()

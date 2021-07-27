@@ -509,7 +509,7 @@ class MainWindow(Gtk.Application):
         return False
 
     def _close_wait(self, child: dict) -> bool:
-        """Wait for child to top before removing the tab.
+        """Wait for child to stop before removing the tab.
 
         Check if the child is still running.  If it is not running remove the
         tab.
