@@ -1421,14 +1421,14 @@ class MainWindow(Gtk.Application):
             if child.is_loading:
                 child.send('stop', True)
             elif entry.get_text() not in (child.uri, ''):
-                if event.button == 2 or (event.button == 1 and \
+                if event.button.button == 2 or (event.button.button == 1 and
                         event.state & Gdk.ModifierType.CONTROL_MASK):
                     self._open_new_tab(event.state, {'uri': entry.get_text()},
                                        child)
                 else:
                     child.send('open-uri', entry.get_text())
             else:
-                if event.button == 2 or (event.button == 1 and \
+                if event.button.button == 2 or (event.button.button == 1 and
                         event.state & Gdk.ModifierType.CONTROL_MASK):
                     self._open_new_tab(event.state, {'uri': child.uri}, child)
                 elif event.state & Gdk.ModifierType.MOD1_MASK:
