@@ -995,6 +995,7 @@ class BrowserProc(Gtk.Application):
             if not looks_like_uri(data):
                 # Data doesn't look like a uri so treat it as a search
                 # string.
+                data = urllib.parse.quote(data)
                 try:
                     data = view_dict.search_url % data
                 except TypeError:
