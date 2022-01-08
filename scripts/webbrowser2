@@ -137,7 +137,7 @@ if __name__ == '__main__':
     else:
         verbosity = 'CRITICAL'
 
-    logging.basicConfig(format=("s033[0;35m%(asctime)s\033[0m:\033[0;34m"
+    logging.basicConfig(format=("\033[0;35m%(asctime)s\033[0m:\033[0;34m"
                                 "%(levelname)s\033[0m:%(message)s"),
                         level=verbosity, datefmt='%a %h %d %T')
 
