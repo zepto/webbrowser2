@@ -198,10 +198,10 @@ class Bookmarks(object):
                 }
             )
             try:
-                print('Checking: {url}'.format(**locals()))
+                print(f"Checking: {url}")
                 response = urlrequest.urlopen(req, timeout=120)
             except Exception as err:
-                print('Error: {err} on url {url}'.format(**locals()))
+                print(f"Error: {err} on url {url}")
                 result.append((err, url, element.findtext('title')))
                 self.remove(element)
 
@@ -250,7 +250,7 @@ class BookmarkMenu(Gtk.Menu):
             self._build_menu(self._bookmarks.get_root())
             self._built = True
         except Exception as err:
-            logging.error('Error building bookmarks menu: {err}'.format(**locals()))
+            logging.error(f"Error building bookmarks menu: {err}")
 
     def update_menu(func: object) -> object:
         """Update the menu after every method that changes the bookmarks."""
@@ -334,7 +334,6 @@ class BookmarkMenu(Gtk.Menu):
         )
 
         for (title, icon_name), func in folder_items_tup:
-            menu_item = Gtk.MenuItem()
             menu_item = self._make_menu_item(title, icon_name)
             menu_item.connect('activate', func, element)
             menu.append(menu_item)
@@ -346,18 +345,17 @@ class BookmarkMenu(Gtk.Menu):
 
         edit_items_tup = (
             (
-                ('Edit {element.tag}', 'text-editor-symbolic'),
+                (f"Edit {element.tag}", 'text-editor-symbolic'),
                 self._edit_menu
             ),
             (
-                ('Delete {element.tag}', 'edit-delete-symbolic'),
+                (f"Delete {element.tag}", 'edit-delete-symbolic'),
                 self._delete_menu
             ),
         )
 
         for (title, icon_name), func in edit_items_tup:
-            menu_item = self._make_menu_item(
-                title.format(**locals()), icon_name)
+            menu_item = self._make_menu_item(title, icon_name)
             menu_item.connect('activate', func, element)
             menu.append(menu_item)
 
@@ -394,9 +392,10 @@ class BookmarkMenu(Gtk.Menu):
         name_dialog.set_name_title('Enter Folder Name')
         name_dialog.set_default_name('New Folder')
         result = name_dialog.run()
-        if not result: return None
+        if not result:
+            return None
 
-        logging.info('Name = {name}'.format(**result))
+        logging.info(f"Name = {result['name']}")
 
         return self._bookmarks.add_folder(element, result['name'])
 
@@ -432,7 +431,8 @@ class BookmarkMenu(Gtk.Menu):
 
         result = edit_dialog.run()
 
-        if not result: return False
+        if not result:
+            return False
 
         logging.info(result)
 
@@ -476,11 +476,12 @@ class BookmarkMenu(Gtk.Menu):
         name_dialog.set_default_uri(uri)
         result = name_dialog.run()
 
-        if not result: return False
+        if not result:
+            return False
 
         uri = result['uri']
         title = result['name']
-        logging.info('Add bookmark {title} => {uri}'.format(**locals()))
+        logging.info(f"Add bookmark {title} => {uri}")
         self._bookmarks.add_bookmark(element, title, uri)
 
         return True
@@ -490,7 +491,7 @@ class BookmarkMenu(Gtk.Menu):
         """Edit element"""
         self.popdown()
         edit_dialog = EditDialog(self._parent,
-                                 'Edit {element.tag}'.format(**locals()),
+                                 f"Edit {element.tag}",
                                  'document-edit-symbolic',
                                  self._bookmarks.iter_type,
                                  element.tag == 'bookmark')
@@ -504,7 +505,7 @@ class BookmarkMenu(Gtk.Menu):
 
         edit_dialog.populate_tree(self._bookmarks.get_root(), folder)
         edit_dialog.set_name_title(
-            'Edit {title} Title'.format(title=element.tag.capitalize())
+            f"Edit {element.tag.capitalize()} Title"
         )
         edit_dialog.set_default_name(element.findtext('title'))
 
@@ -517,7 +518,7 @@ class BookmarkMenu(Gtk.Menu):
         parent_trans = self._add_folders(result.get('new-folder', ()))
         self._bookmarks.edit(element, *result['changed'])
         destination = parent_trans.get(result['move'], result['move'])
-        logging.info('move from {folder} to {destination}'.format(**locals()))
+        logging.info(f"move from {folder} to {destination}")
         self._bookmarks.move(element, destination)
 
         return True
@@ -666,7 +667,7 @@ class EntryDialog(GObject.GObject):
 
     def _set_frame_label(self, frame: object, label: str):
         """Set the label text."""
-        label = Gtk.Label('<b>{title}</b>'.format(title=label))
+        label = Gtk.Label(f"<b>{label}</b>")
         label.set_use_markup(True)
         frame.set_label_widget(label)
 
@@ -893,7 +894,7 @@ class EditDialog(GObject.GObject):
 
     def _set_frame_label(self, frame: object, label: str):
         """Set the label text."""
-        label = Gtk.Label('<b>{title}</b>'.format(title=label))
+        label = Gtk.Label(f"<b>{label}</b>")
         label.set_use_markup(True)
         label.show_all()
         frame.set_label_widget(label)
@@ -907,7 +908,7 @@ class EditDialog(GObject.GObject):
         result = name_dialog.run()
 
         if result:
-            logging.info('Name = {name}'.format(**result))
+            logging.info(f"Name = {result['name']}")
             folder_name = result['name']
 
             # Get the tree_iter of the selection so the new folder can
@@ -924,7 +925,7 @@ class EditDialog(GObject.GObject):
             # Use the id of the folder_iter so folders/bookmarks can be
             # moved to the correct folder.
             iter_id = id(folder_iter)
-            folder_id = '{folder_name}{iter_id}'.format(**locals())
+            folder_id = f"{folder_name}{iter_id}"
             self._tree_store.set_value(folder_iter, 2, folder_id)
 
             self._new_folder_list.append((folder_name, self._selected,

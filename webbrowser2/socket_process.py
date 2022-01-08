@@ -30,7 +30,7 @@ from json import loads as json_loads
 from gi import require_version as gi_require_version
 gi_require_version('Gtk', '3.0')
 gi_require_version('WebKit2', '4.0')
-from gi.repository import WebKit2, Gtk, Gdk, GLib, Pango, Gio, GdkPixbuf
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, WebKit2
 from .classes import ContentFilterSettings, ContentFilterWhitelistSettings
 from .classes import AgentSettings, AdBlockSettings, MediaFilterSettings
 from .classes import SettingsManager, SessionManager, DownloadManager
