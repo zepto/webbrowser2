@@ -1,1 +1,12 @@
-webbrowser2 is a webkit2gtk web browser.
+webbrowser2
+===========
+
+A multiprocess web browser using webkit2gtk.  The main window is a seperate
+process from the address bar and renderer of eatch tab.  Each tab contains a
+gtk socket object.  The real browser (the webview and address bar) are embeded
+into the socket using a gtk plug object.  Communication among the seperate
+processes is accomplished using python multiprocess Pipes created by the main
+process.  The main process is responsible for opening and closing all other
+processes and creating pipes so the main window process can communicate with
+all the browser processes.  When all the tabs have closed the main window
+process sends a signal to the main process telling it to close.
